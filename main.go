@@ -2,21 +2,31 @@ package main
 
 import (
 	"log"
+	"os"
 
 	ui "github.com/gizak/termui/v3"
-	"github.com/jondoveston/promtop/internal"
+	promtop "github.com/jondoveston/promtop/internal"
 	"github.com/spf13/viper"
-  "github.com/Kerrigan29a/drawille-go"
 )
 
 func main() {
+
+	logfile, err := os.OpenFile("promtop.log", os.O_RDWR|os.O_CREATE|os.O_APPEND, 0666)
+	if err != nil {
+		log.Fatalf("error opening file: %v", err)
+	}
+	defer logfile.Close()
+
+	log.SetOutput(logfile)
+	log.Println("Starting Promtop")
+
 	viper.SetEnvPrefix("promtop")
-	viper.BindEnv("prometheus_url")
-	viper.BindEnv("node_exporter_url")
+	_ = viper.BindEnv("prometheus_url")
+	_ = viper.BindEnv("node_exporter_url")
 	viper.SetDefault("node_exporter_url", "http://localhost:9100/metrics")
 
 	if viper.Get("prometheus_url") == "" && viper.Get("node_exporter_url") == "" {
-		log.Fatalf("prometheus_url or node_exporter_url must be set")
+		log.Fatalln("prometheus_url or node_exporter_url must be set")
 	}
 
 	if err := ui.Init(); err != nil {
@@ -24,10 +34,11 @@ func main() {
 	}
 	defer ui.Close()
 
+	var d promtop.Data
 	if viper.GetString("prometheus_url") != "" {
-		promtop.PrometheusDashboard()
-		log.Printf(viper.GetString("prometheus_url"))
+		d = &promtop.PrometheusData{}
 	} else if viper.GetString("node_exporter_url") != "" {
-		promtop.NodeExporterDashboard()
+		d = &promtop.NodeExporterData{}
 	}
+	promtop.Dashboard(promtop.Cache{Data: d})
 }
