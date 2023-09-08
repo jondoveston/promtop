@@ -1,0 +1,49 @@
+# https://taskfile.dev
+
+version: '3'
+
+vars:
+  APP: promtop
+  VERSION: 0.0.1
+
+tasks:
+  default:
+    cmds:
+      - task: build
+
+  build:
+    cmd: "go build -ldflags=\"-X 'main.version={{ .VERSION }}'\" -v -o {{ .APP }} main.go"
+    sources:
+      - ./**/*.go
+    generates:
+      - ./{{ .APP }}
+
+  run_prom:
+    env:
+      PROMTOP_PROMETHEUS_URL: http://prometheus.lan:9090
+    cmd: ./{{ .APP }}
+
+  run_node:
+    env:
+      PROMTOP_NODE_EXPORTER_URL: http://localhost:9100/metrics
+    cmd: ./{{ .APP }}
+
+  clean:
+    cmd: rm -f {{ .APP }}
+
+  fmt:
+    cmd: gofmt -s -w .
+
+  test:
+    cmd: go test
+
+  watch:
+    cmd: fd -e go | entr task test
+
+  release:
+    cmd: "goreleaser build --single-target --rm-dist --snapshot --skip-validate --skip-post-hooks -o {{ .APP }}"
+
+  install:
+    cmds:
+      - "sudo cp {{ .APP }} /usr/local/bin/{{ .APP }}"
+      - "sudo chmod +x /usr/local/bin/{{ .APP }}"
