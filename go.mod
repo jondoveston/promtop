@@ -1,10 +1,11 @@
 module github.com/jondoveston/promtop
 
-go 1.21
+go 1.25
 
 require (
 	github.com/gizak/termui/v3 v3.1.0
 	github.com/prometheus/client_golang v1.10.0
+	github.com/prometheus/client_model v0.2.0
 	github.com/prometheus/common v0.20.0
 	github.com/spf13/viper v1.15.0
 )
@@ -23,7 +24,6 @@ require (
 	github.com/modern-go/reflect2 v1.0.2 // indirect
 	github.com/nsf/termbox-go v0.0.0-20190121233118-02980233997d // indirect
 	github.com/pelletier/go-toml/v2 v2.0.6 // indirect
-	github.com/prometheus/client_model v0.2.0 // indirect
 	github.com/spf13/afero v1.9.3 // indirect
 	github.com/spf13/cast v1.5.0 // indirect
 	github.com/spf13/jwalterweatherman v1.1.0 // indirect
