@@ -9,20 +9,19 @@ import (
 	"github.com/spf13/viper"
 )
 
+var version = "dev"
+
 func main() {
-
-	logfile, err := os.OpenFile("promtop.log", os.O_RDWR|os.O_CREATE|os.O_APPEND, 0666)
-	if err != nil {
-		log.Fatalf("error opening file: %v", err)
-	}
-	defer logfile.Close()
-
-	log.SetOutput(logfile)
-	log.Println("Starting Promtop")
+	log.SetOutput(os.Stderr)
+	log.Printf("Starting Promtop %s", version)
 
 	viper.SetEnvPrefix("promtop")
-	_ = viper.BindEnv("prometheus_url")
-	_ = viper.BindEnv("node_exporter_url")
+	if err := viper.BindEnv("prometheus_url"); err != nil {
+		log.Fatalf("failed to bind prometheus_url: %v", err)
+	}
+	if err := viper.BindEnv("node_exporter_url"); err != nil {
+		log.Fatalf("failed to bind node_exporter_url: %v", err)
+	}
 	viper.SetDefault("node_exporter_url", "http://localhost:9100/metrics")
 
 	if viper.Get("prometheus_url") == "" && viper.Get("node_exporter_url") == "" {

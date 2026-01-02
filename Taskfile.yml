@@ -19,14 +19,16 @@ tasks:
       - ./{{ .APP }}
 
   run_prom:
+    deps: [build]
     env:
       PROMTOP_PROMETHEUS_URL: http://prometheus.lan:9090
-    cmd: ./{{ .APP }}
+    cmd: ./{{ .APP }} 2>promtop.log
 
   run_node:
+    deps: [build]
     env:
       PROMTOP_NODE_EXPORTER_URL: http://localhost:9100/metrics
-    cmd: ./{{ .APP }}
+    cmd: ./{{ .APP }} 2>promtop.log
 
   clean:
     cmd: rm -f {{ .APP }}
