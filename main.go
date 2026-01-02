@@ -4,7 +4,6 @@ import (
 	"log"
 	"os"
 
-	ui "github.com/gizak/termui/v3"
 	promtop "github.com/jondoveston/promtop/internal"
 	"github.com/spf13/viper"
 )
@@ -27,11 +26,6 @@ func main() {
 	if viper.Get("prometheus_url") == "" && viper.Get("node_exporter_url") == "" {
 		log.Fatalln("prometheus_url or node_exporter_url must be set")
 	}
-
-	if err := ui.Init(); err != nil {
-		log.Fatalf("failed to initialize termui: %v", err)
-	}
-	defer ui.Close()
 
 	var d promtop.Data
 	if viper.GetString("prometheus_url") != "" {
