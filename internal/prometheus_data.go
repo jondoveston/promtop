@@ -2,7 +2,9 @@ package promtop
 
 import (
 	"context"
+	"fmt"
 	"log"
+	"net/url"
 	"sort"
 	"strconv"
 	"time"
@@ -10,27 +12,55 @@ import (
 	"github.com/prometheus/client_golang/api"
 	v1 "github.com/prometheus/client_golang/api/prometheus/v1"
 	"github.com/prometheus/common/model"
-	"github.com/spf13/viper"
 )
 
 type PrometheusData struct {
+	client api.Client
+	url    *url.URL
 }
 
-func (p *PrometheusData) getClient() api.Client {
+func NewPrometheusData(prometheusURL *url.URL) (*PrometheusData, error) {
 	client, err := api.NewClient(api.Config{
-		Address: viper.GetString("prometheus_url"),
+		Address: prometheusURL.String(),
 	})
 	if err != nil {
-		log.Fatalf("Error creating client: %v", err)
+		return nil, fmt.Errorf("failed to create prometheus client: %w", err)
 	}
 
-	return client
+	return &PrometheusData{
+		client: client,
+		url:    prometheusURL,
+	}, nil
+}
+
+func (p *PrometheusData) Check() error {
+	v1api := v1.NewAPI(p.client)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	// Test basic Prometheus API connectivity
+	result, warnings, err := v1api.Query(ctx, "up", time.Now())
+	if err != nil {
+		return fmt.Errorf("prometheus API query failed: %w", err)
+	}
+	if len(warnings) > 0 {
+		log.Printf("Prometheus warnings: %v", warnings)
+	}
+
+	// Verify node_exporter job exists
+	result, _, err = v1api.Query(ctx, "up{job=\"node_exporter\"}", time.Now())
+	if err != nil {
+		return fmt.Errorf("node_exporter job query failed: %w", err)
+	}
+	if result.(model.Vector).Len() == 0 {
+		return fmt.Errorf("no node_exporter targets found in prometheus")
+	}
+
+	return nil
 }
 
 func (p *PrometheusData) GetNodes() []string {
-	client := p.getClient()
-
-	v1api := v1.NewAPI(client)
+	v1api := v1.NewAPI(p.client)
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	result, warnings, err := v1api.Query(ctx, "up{job=\"node_exporter\"}", time.Now())
@@ -52,9 +82,7 @@ func (p *PrometheusData) GetNodes() []string {
 }
 
 func (p *PrometheusData) GetCpu(node string) []float64 {
-	client := p.getClient()
-
-	v1api := v1.NewAPI(client)
+	v1api := v1.NewAPI(p.client)
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	result, warnings, err := v1api.Query(ctx, "100 - (avg by (instance,cpu) (rate(node_cpu_seconds_total{instance=\""+node+"\",job=\"node_exporter\",mode=\"idle\"}[1m])) * 100)", time.Now())
