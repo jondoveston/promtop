@@ -12,7 +12,7 @@ import (
 
 type dashboardModel struct {
 	cache        Cache
-	instances    []string
+	nodes        []string
 	selectedNode int
 	selectedTab  int
 	tabs         []string
@@ -33,7 +33,7 @@ func tickCmd() tea.Cmd {
 func NewDashboard(cache Cache) *dashboardModel {
 	return &dashboardModel{
 		cache:        cache,
-		instances:    cache.GetInstances(),
+		nodes:        cache.GetNodes(),
 		selectedNode: 0,
 		selectedTab:  0,
 		tabs:         []string{"CPU", "Memory", "Disk", "Network"},
@@ -52,7 +52,7 @@ func (m dashboardModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "ctrl+c", "q":
 			return m, tea.Quit
 		case "j", "down":
-			if m.selectedNode < len(m.instances)-1 {
+			if m.selectedNode < len(m.nodes)-1 {
 				m.selectedNode++
 			}
 		case "k", "up":
@@ -70,9 +70,9 @@ func (m dashboardModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "g":
 			m.selectedNode = 0
 		case "G":
-			m.selectedNode = len(m.instances) - 1
+			m.selectedNode = len(m.nodes) - 1
 		case "ctrl+d":
-			m.selectedNode = min(m.selectedNode+5, len(m.instances)-1)
+			m.selectedNode = min(m.selectedNode+5, len(m.nodes)-1)
 		case "ctrl+u":
 			m.selectedNode = max(m.selectedNode-5, 0)
 		}
@@ -83,12 +83,12 @@ func (m dashboardModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.ready = true
 
 	case tickMsg:
-		// Update instances
-		m.instances = m.cache.GetInstances()
+		// Update nodes
+		m.nodes = m.cache.GetNodes()
 
 		// Update CPU data for selected node
-		if len(m.instances) > 0 && m.selectedNode < len(m.instances) {
-			cpus := m.cache.GetCpu(m.instances[m.selectedNode])
+		if len(m.nodes) > 0 && m.selectedNode < len(m.nodes) {
+			cpus := m.cache.GetCpu(m.nodes[m.selectedNode])
 
 			// Initialize CPU data if needed
 			if len(m.cpuData) != len(cpus) {
@@ -135,30 +135,48 @@ func (m dashboardModel) View() string {
 		Bold(true)
 
 	// Calculate dimensions
-	nodeListWidth := 30
-	if m.width > 0 {
-		nodeListWidth = min(nodeListWidth, m.width/4)
+	// Calculate minimum width based on longest node name
+	nodeListWidth := 1 // minimum width
+	for _, node := range m.nodes {
+		nodeLen := len(node) + 3 // 2 for "▶ " prefix + 1 for padding
+		if nodeLen > nodeListWidth {
+			nodeListWidth = nodeLen
+		}
 	}
+	// Add border padding
+	nodeListWidth += 1
 
 	// Render node list
-	nodeListHeight := m.height - 4
+	// Calculate height based on number of nodes
+	nodeListHeight := len(m.nodes) + 1 // +1 for title
+	maxHeight := m.height - 2
+	if nodeListHeight > maxHeight {
+		nodeListHeight = maxHeight
+	}
+
 	var nodeList strings.Builder
 	nodeList.WriteString(titleStyle.Render("Nodes") + "\n")
 
-	startIdx := max(0, m.selectedNode-nodeListHeight+2)
-	endIdx := min(len(m.instances), startIdx+nodeListHeight-1)
+	// Calculate visible range
+	visibleNodes := nodeListHeight - 1 // Account for title
+	startIdx := max(0, m.selectedNode-visibleNodes+1)
+	endIdx := min(len(m.nodes), startIdx+visibleNodes)
 
 	for i := startIdx; i < endIdx; i++ {
 		if i == m.selectedNode {
-			nodeList.WriteString(selectedStyle.Render("▶ "+m.instances[i]) + "\n")
+			nodeList.WriteString(selectedStyle.Render("▶ " + m.nodes[i]))
 		} else {
-			nodeList.WriteString("  " + m.instances[i] + "\n")
+			nodeList.WriteString("  " + m.nodes[i])
+		}
+		// Add newline except for last item
+		if i < endIdx-1 {
+			nodeList.WriteString("\n")
 		}
 	}
 
 	nodeListBox := borderStyle.
 		Width(nodeListWidth).
-		Height(m.height - 2).
+		Height(nodeListHeight).
 		Render(nodeList.String())
 
 	// Render tabs
