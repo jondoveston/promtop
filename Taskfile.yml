@@ -21,7 +21,7 @@ tasks:
   run_prom:
     deps: [build]
     env:
-      PROMTOP_PROMETHEUS_URL: http://prometheus.lan:9090
+      PROMTOP_PROMETHEUS_URL: https://prometheus.doveston.me.uk
     cmd: ./{{ .APP }} 2>promtop.log
 
   run_node:
