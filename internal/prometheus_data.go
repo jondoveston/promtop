@@ -27,7 +27,7 @@ func (p *PrometheusData) getClient() api.Client {
 	return client
 }
 
-func (p *PrometheusData) GetInstances() []string {
+func (p *PrometheusData) GetNodes() []string {
 	client := p.getClient()
 
 	v1api := v1.NewAPI(client)
@@ -41,23 +41,23 @@ func (p *PrometheusData) GetInstances() []string {
 		log.Fatalf("Warnings: %v\n", warnings)
 	}
 
-	instances := make([]string, 0, result.(model.Vector).Len())
+	nodes := make([]string, 0, result.(model.Vector).Len())
 	for _, val := range result.(model.Vector) {
 		if val.Value == 1 {
-			instances = append(instances, string(val.Metric["instance"]))
+			nodes = append(nodes, string(val.Metric["instance"]))
 		}
 	}
 
-	return instances
+	return nodes
 }
 
-func (p *PrometheusData) GetCpu(instance string) []float64 {
+func (p *PrometheusData) GetCpu(node string) []float64 {
 	client := p.getClient()
 
 	v1api := v1.NewAPI(client)
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	result, warnings, err := v1api.Query(ctx, "100 - (avg by (instance,cpu) (rate(node_cpu_seconds_total{instance=\""+instance+"\",job=\"node_exporter\",mode=\"idle\"}[1m])) * 100)", time.Now())
+	result, warnings, err := v1api.Query(ctx, "100 - (avg by (instance,cpu) (rate(node_cpu_seconds_total{instance=\""+node+"\",job=\"node_exporter\",mode=\"idle\"}[1m])) * 100)", time.Now())
 	if err != nil {
 		log.Fatalf("Error querying Prometheus: %v", err)
 	}

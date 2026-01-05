@@ -21,40 +21,40 @@ import (
 type NodeExporterData struct {
 	cpus       [][]*dto.Metric
 	timestamps []time.Time
-	instances  map[string]*url.URL
+	nodes      map[string]*url.URL
 }
 
-func (n *NodeExporterData) instanceToUrl() map[string]*url.URL {
-	if n.instances != nil {
-		return n.instances
+func (n *NodeExporterData) nodeToUrl() map[string]*url.URL {
+	if n.nodes != nil {
+		return n.nodes
 	}
 
-  n.instances = make(map[string]*url.URL)
+	n.nodes = make(map[string]*url.URL)
 
 	for _, raw := range viper.GetStringSlice("node_exporter_url") {
 		u, err := url.Parse(raw)
 		if err != nil {
 			log.Fatalln("Error parsing url:", raw, err)
 		}
-		n.instances[u.Hostname()] = u
+		n.nodes[u.Hostname()] = u
 	}
-	return n.instances
+	return n.nodes
 }
 
-func (n *NodeExporterData) GetInstances() []string {
-	keys := make([]string, 0, len(n.instanceToUrl()))
-	for k := range n.instanceToUrl() {
+func (n *NodeExporterData) GetNodes() []string {
+	keys := make([]string, 0, len(n.nodeToUrl()))
+	for k := range n.nodeToUrl() {
 		keys = append(keys, k)
 	}
 	slices.Sort(keys)
 	return keys
 }
 
-func (n *NodeExporterData) GetCpu(instance string) []float64 {
+func (n *NodeExporterData) GetCpu(node string) []float64 {
 	client := http.Client{
 		Timeout: 5 * time.Second,
 	}
-	resp, err := client.Get(n.instanceToUrl()[instance].String())
+	resp, err := client.Get(n.nodeToUrl()[node].String())
 	if err != nil {
 		log.Fatalln("Error querying node exporter:", err)
 	}
