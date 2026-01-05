@@ -1,10 +1,14 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+This file provides guidance to Claude Code (claude.ai/code) when working with
+code in this repository.
 
 ## Project Overview
 
-`promtop` is a terminal-based dashboard application for monitoring system metrics from Prometheus or directly from node_exporter. Built with Go and termui, it displays real-time CPU, memory, disk, and network metrics in an interactive terminal interface.
+`promtop` is a terminal-based dashboard application for monitoring system
+metrics from Prometheus or directly from node_exporter. Built with Go and
+termui, it displays real-time CPU, memory, disk, and network metrics in an
+interactive terminal interface.
 
 ## Build & Run
 
@@ -47,29 +51,39 @@ task run_node
 
 ### Data Source Abstraction
 
-The application uses an interface-based design to support multiple metric backends:
+The application uses an interface-based design to support multiple metric
+backends:
 
-- **`Data` interface** (`internal/cache.go`): Defines `GetCpu()` and `GetInstances()` methods
-- **`PrometheusData`** (`internal/prometheus_data.go`): Queries Prometheus API using PromQL
-- **`NodeExporterData`** (`internal/node_exporter_data.go`): Scrapes node_exporter `/metrics` endpoint directly
-- **`Cache`** (`internal/cache.go`): Wraps Data implementations with caching for instance lists
+- **`Data` interface** (`internal/cache.go`): Defines `GetCpu()` and
+  `GetNodes()` methods
+- **`PrometheusData`** (`internal/prometheus_data.go`): Queries Prometheus API
+  using PromQL
+- **`NodeExporterData`** (`internal/node_exporter_data.go`): Scrapes
+  node_exporter `/metrics` endpoint directly
+- **`Cache`** (`internal/cache.go`): Wraps Data implementations with caching for
+  node lists
 
-The main function (`main.go`) selects the appropriate backend based on environment variables.
+The main function (`main.go`) selects the appropriate backend based on
+environment variables.
 
 ### UI Architecture
 
 The dashboard (`internal/dashboard.go`) uses gizak/termui v3:
 
-- Left panel: scrollable list of instances/nodes
+- Left panel: scrollable list of nodes
 - Right panel: tabbed interface (CPU, Memory, Disk, Network)
 - CPU tab displays per-core usage graphs that update every second
-- Vim-style keybindings (j/k for scrolling, h/l for tab switching, g/G for top/bottom)
+- Vim-style keybindings (j/k for scrolling, h/l for tab switching, g/G for
+  top/bottom)
 
 ### CPU Metrics Calculation
 
-**PrometheusData**: Uses PromQL query `100 - (avg by (instance,cpu) (rate(node_cpu_seconds_total{mode="idle"}[1m])) * 100)` to calculate CPU usage from idle time.
+**PrometheusData**: Uses PromQL query
+`100 - (avg by (instance,cpu) (rate(node_cpu_seconds_total{mode="idle"}[1m])) * 100)`
+to calculate CPU usage from idle time.
 
 **NodeExporterData**: Implements custom rate calculation:
+
 - Stores last 60 readings with timestamps
 - Handles counter resets by tracking offsets
 - Calculates usage as `100 - 100*(idle_delta)/interval`
@@ -80,10 +94,12 @@ Configuration is handled via Viper with environment variable support:
 
 - Prefix: `PROMTOP_`
 - `PROMTOP_PROMETHEUS_URL`: Prometheus server URL
-- `PROMTOP_NODE_EXPORTER_URL`: node_exporter metrics endpoint (default: `http://localhost:9100/metrics`)
+- `PROMTOP_NODE_EXPORTER_URL`: node_exporter metrics endpoint (default:
+  `http://localhost:9100/metrics`)
 
 At least one URL must be set. If both are set, Prometheus takes precedence.
 
 ## Logging
 
-Application logs to `promtop.log` in the current directory. Check this file for debugging connection issues or metric parsing errors.
+Application logs to `promtop.log` in the current directory. Check this file for
+debugging connection issues or metric parsing errors.
