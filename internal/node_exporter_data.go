@@ -2,20 +2,18 @@ package promtop
 
 import (
 	"cmp"
+	"fmt"
 	"io"
 	"log"
 	"net/http"
+	"net/url"
 	"slices"
 	"strconv"
 	"strings"
 	"time"
 
-	"net/url"
-
 	"github.com/prometheus/common/expfmt"
-	// "github.com/prometheus/client_golang/prometheus"
 	dto "github.com/prometheus/client_model/go"
-	"github.com/spf13/viper"
 )
 
 type NodeExporterData struct {
@@ -24,26 +22,83 @@ type NodeExporterData struct {
 	nodes      map[string]*url.URL
 }
 
-func (n *NodeExporterData) nodeToUrl() map[string]*url.URL {
-	if n.nodes != nil {
-		return n.nodes
+func NewNodeExporterData(urls []*url.URL) (*NodeExporterData, error) {
+	if len(urls) == 0 {
+		return nil, fmt.Errorf("at least one node_exporter URL required")
 	}
 
-	n.nodes = make(map[string]*url.URL)
-
-	for _, raw := range viper.GetStringSlice("node_exporter_url") {
-		u, err := url.Parse(raw)
-		if err != nil {
-			log.Fatalln("Error parsing url:", raw, err)
+	nodes := make(map[string]*url.URL)
+	for _, u := range urls {
+		hostname := u.Hostname()
+		if hostname == "" {
+			return nil, fmt.Errorf("URL missing hostname: %s", u.String())
 		}
-		n.nodes[u.Hostname()] = u
+		// Include port in hostname if present
+		if u.Port() != "" {
+			hostname = hostname + ":" + u.Port()
+		}
+		nodes[hostname] = u
 	}
-	return n.nodes
+
+	return &NodeExporterData{
+		nodes: nodes,
+	}, nil
+}
+
+func (n *NodeExporterData) Check() error {
+	client := http.Client{
+		Timeout: 5 * time.Second,
+	}
+
+	// Test at least one node_exporter endpoint
+	var lastErr error
+	for hostname, u := range n.nodes {
+		resp, err := client.Get(u.String())
+		if err != nil {
+			lastErr = fmt.Errorf("failed to connect to %s: %w", hostname, err)
+			continue
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusOK {
+			lastErr = fmt.Errorf("%s returned status %d", hostname, resp.StatusCode)
+			continue
+		}
+
+		// Try to parse metrics to validate it's a real node_exporter endpoint
+		body, err := io.ReadAll(resp.Body)
+		if err != nil {
+			lastErr = fmt.Errorf("failed to read response from %s: %w", hostname, err)
+			continue
+		}
+
+		parser := expfmt.TextParser{}
+		data, err := parser.TextToMetricFamilies(strings.NewReader(string(body)))
+		if err != nil {
+			lastErr = fmt.Errorf("failed to parse metrics from %s: %w", hostname, err)
+			continue
+		}
+
+		// Validate it has CPU metrics (basic check)
+		if _, ok := data["node_cpu_seconds_total"]; !ok {
+			lastErr = fmt.Errorf("%s does not provide node_cpu_seconds_total metric", hostname)
+			continue
+		}
+
+		// At least one node works
+		return nil
+	}
+
+	// All nodes failed
+	if lastErr != nil {
+		return lastErr
+	}
+	return fmt.Errorf("no node_exporter endpoints available")
 }
 
 func (n *NodeExporterData) GetNodes() []string {
-	keys := make([]string, 0, len(n.nodeToUrl()))
-	for k := range n.nodeToUrl() {
+	keys := make([]string, 0, len(n.nodes))
+	for k := range n.nodes {
 		keys = append(keys, k)
 	}
 	slices.Sort(keys)
@@ -54,7 +109,7 @@ func (n *NodeExporterData) GetCpu(node string) []float64 {
 	client := http.Client{
 		Timeout: 5 * time.Second,
 	}
-	resp, err := client.Get(n.nodeToUrl()[node].String())
+	resp, err := client.Get(n.nodes[node].String())
 	if err != nil {
 		log.Fatalln("Error querying node exporter:", err)
 	}

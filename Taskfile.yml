@@ -20,15 +20,11 @@ tasks:
 
   run_prom:
     deps: [build]
-    env:
-      PROMTOP_PROMETHEUS_URL: https://prometheus.doveston.me.uk
-    cmd: ./{{ .APP }} 2>promtop.log
+    cmd: ./{{ .APP }} https://prometheus.doveston.me.uk 2>promtop.log
 
   run_node:
     deps: [build]
-    env:
-      PROMTOP_NODE_EXPORTER_URL: http://localhost:9100/metrics
-    cmd: ./{{ .APP }} 2>promtop.log
+    cmd: ./{{ .APP }} http://localhost:9100/metrics 2>promtop.log
 
   clean:
     cmd: rm -f {{ .APP }}

@@ -3,6 +3,7 @@ package promtop
 type Data interface {
 	GetCpu(string) []float64
 	GetNodes() []string
+	Check() error
 }
 
 type Cache struct {
