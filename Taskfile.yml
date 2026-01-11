@@ -26,6 +26,10 @@ tasks:
     deps: [build]
     cmd: ./{{ .APP }} http://localhost:9100/metrics 2>promtop.log
 
+  run:
+    deps: [build]
+    cmd: ./{{ .APP }} https://prometheus.doveston.me.uk http://localhost:9100/metrics 2>promtop.log
+
   clean:
     cmd: rm -f {{ .APP }}
 

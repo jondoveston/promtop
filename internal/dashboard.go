@@ -3,6 +3,7 @@ package promtop
 import (
 	"fmt"
 	"log"
+	"sort"
 	"strings"
 	"time"
 
@@ -10,9 +11,18 @@ import (
 	"github.com/charmbracelet/lipgloss"
 )
 
+type NodeRef struct {
+	Type        string // prometheus, prometheus_node, node_exporter
+	SourceIndex int    // Index into sources array
+	SourceName  string // Human-readable source name (hostname from URL)
+	NodeName    string // Node name from GetNodes() (empty if IsSourceHeader)
+	DisplayName string // Formatted for UI
+}
+
 type dashboardModel struct {
-	cache        Cache
-	nodes        []string
+	sources      []Cache
+	sourceNames  []string
+	nodeRefs     []NodeRef
 	selectedNode int
 	selectedTab  int
 	tabs         []string
@@ -30,15 +40,61 @@ func tickCmd() tea.Cmd {
 	})
 }
 
-func NewDashboard(cache Cache) *dashboardModel {
-	return &dashboardModel{
-		cache:        cache,
-		nodes:        cache.GetNodes(),
+func NewDashboard(sources []Cache, sourceNames []string) *dashboardModel {
+	m := &dashboardModel{
+		sources:      sources,
+		sourceNames:  sourceNames,
 		selectedNode: 0,
 		selectedTab:  0,
 		tabs:         []string{"CPU", "Memory", "Disk", "Network"},
 		cpuData:      make([][]float64, 0),
 	}
+	m.nodeRefs = m.refreshNodes()
+	return m
+}
+
+func (m dashboardModel) refreshNodes() []NodeRef {
+	var nodeRefs []NodeRef
+
+	// Iterate through each source
+	for sourceIdx, source := range m.sources {
+		nodes := source.GetNodes()
+		sort.Strings(nodes)
+
+		if source.GetType() == "prometheus" {
+			// For Prometheus: add source header, then nodes
+			nodeRefs = append(nodeRefs, NodeRef{
+				Type:        "prometheus",
+				SourceIndex: sourceIdx,
+				SourceName:  m.sourceNames[sourceIdx],
+				NodeName:    "",
+				DisplayName: m.sourceNames[sourceIdx],
+			})
+
+			for _, nodeName := range nodes {
+				nodeRefs = append(nodeRefs, NodeRef{
+					Type:        "prometheus_node",
+					SourceIndex: sourceIdx,
+					SourceName:  m.sourceNames[sourceIdx],
+					NodeName:    nodeName,
+					DisplayName: nodeName,
+				})
+			}
+		} else {
+			// For node_exporter: single line per node (no header)
+			for _, nodeName := range nodes {
+				nodeRefs = append(nodeRefs, NodeRef{
+					Type:        "node_exporter",
+					SourceIndex: sourceIdx,
+					SourceName:  m.sourceNames[sourceIdx],
+					NodeName:    nodeName,
+					DisplayName: nodeName,
+				})
+			}
+		}
+	}
+
+	return nodeRefs
 }
 
 func (m dashboardModel) Init() tea.Cmd {
@@ -52,7 +108,7 @@ func (m dashboardModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "ctrl+c", "q":
 			return m, tea.Quit
 		case "j", "down":
-			if m.selectedNode < len(m.nodes)-1 {
+			if m.selectedNode < len(m.nodeRefs)-1 {
 				m.selectedNode++
 			}
 		case "k", "up":
@@ -70,9 +126,9 @@ func (m dashboardModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "g":
 			m.selectedNode = 0
 		case "G":
-			m.selectedNode = len(m.nodes) - 1
+			m.selectedNode = len(m.nodeRefs) - 1
 		case "ctrl+d":
-			m.selectedNode = min(m.selectedNode+5, len(m.nodes)-1)
+			m.selectedNode = min(m.selectedNode+5, len(m.nodeRefs)-1)
 		case "ctrl+u":
 			m.selectedNode = max(m.selectedNode-5, 0)
 		}
@@ -84,30 +140,40 @@ func (m dashboardModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case tickMsg:
 		// Update nodes
-		m.nodes = m.cache.GetNodes()
+		m.nodeRefs = m.refreshNodes()
 
-		// Update CPU data for selected node
-		if len(m.nodes) > 0 && m.selectedNode < len(m.nodes) {
-			cpus := m.cache.GetCpu(m.nodes[m.selectedNode])
+		// Bounds check after refresh
+		if m.selectedNode >= len(m.nodeRefs) {
+			m.selectedNode = max(0, len(m.nodeRefs)-1)
+		}
 
-			// Initialize CPU data if needed
-			if len(m.cpuData) != len(cpus) {
-				m.cpuData = make([][]float64, len(cpus))
-				for i := range m.cpuData {
-					m.cpuData[i] = []float64{}
+		// Update CPU data for selected node (skip if source header is selected)
+		if len(m.nodeRefs) > 0 && m.selectedNode < len(m.nodeRefs) {
+			selectedRef := m.nodeRefs[m.selectedNode]
+
+			// Only fetch CPU data if a node is selected (not a prometheus)
+			if selectedRef.Type != "prometheus" {
+				cpus := m.sources[selectedRef.SourceIndex].GetCpu(selectedRef.NodeName)
+
+				// Initialize CPU data if needed
+				if len(m.cpuData) != len(cpus) {
+					m.cpuData = make([][]float64, len(cpus))
+					for i := range m.cpuData {
+						m.cpuData[i] = []float64{}
+					}
 				}
-			}
 
-			// Append new data and trim
-			maxDataPoints := max(m.width-40, 20)
-			for i, c := range cpus {
-				m.cpuData[i] = append(m.cpuData[i], c)
-				if len(m.cpuData[i]) > maxDataPoints {
-					m.cpuData[i] = m.cpuData[i][len(m.cpuData[i])-maxDataPoints:]
+				// Append new data and trim
+				maxDataPoints := max(m.width-40, 20)
+				for i, c := range cpus {
+					m.cpuData[i] = append(m.cpuData[i], c)
+					if len(m.cpuData[i]) > maxDataPoints {
+						m.cpuData[i] = m.cpuData[i][len(m.cpuData[i])-maxDataPoints:]
+					}
 				}
-			}
 
-			// log.Printf("Updated CPU data: %d cores, %d data points", len(cpus), len(m.cpuData[0]))
+				// log.Printf("Updated CPU data: %d cores, %d data points", len(cpus), len(m.cpuData[0]))
+			}
 		}
 
 		return m, tickCmd()
@@ -134,50 +200,58 @@ func (m dashboardModel) View() string {
 		Foreground(lipgloss.Color("33")).
 		Bold(true)
 
+	sourceHeaderStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("214")).
+		Bold(true)
+
 	// Calculate dimensions
-	// Calculate minimum width based on longest node name
+	// Calculate minimum width based on longest node name and source name
 	nodeListWidth := 1 // minimum width
-	for _, node := range m.nodes {
-		nodeLen := len(node) + 3 // 2 for "▶ " prefix + 1 for padding
-		if nodeLen > nodeListWidth {
-			nodeListWidth = nodeLen
+	for _, nodeRef := range m.nodeRefs {
+		// All items: "  " + "▶ " + name (when selected) or "    " + name (when not)
+		// Maximum width is "  ▶ " + longest name
+		itemLen := len(nodeRef.DisplayName) + 5 // "  " + "▶ " + " " + 1 for padding
+		if itemLen > nodeListWidth {
+			nodeListWidth = itemLen
 		}
 	}
 	// Add border padding
 	nodeListWidth += 1
 
 	// Render node list
-	// Calculate height based on number of nodes
-	nodeListHeight := len(m.nodes) + 1 // +1 for title
-	maxHeight := m.height - 2
-	if nodeListHeight > maxHeight {
-		nodeListHeight = maxHeight
-	}
-
 	var nodeList strings.Builder
 	nodeList.WriteString(titleStyle.Render("Nodes") + "\n")
 
-	// Calculate visible range
-	visibleNodes := nodeListHeight - 1 // Account for title
-	startIdx := max(0, m.selectedNode-visibleNodes+1)
-	endIdx := min(len(m.nodes), startIdx+visibleNodes)
+	lineCount := 1 // Start at 1 for title
+	maxLines := m.height - 3
 
-	for i := startIdx; i < endIdx; i++ {
-		if i == m.selectedNode {
-			nodeList.WriteString(selectedStyle.Render("▶ " + m.nodes[i]))
+	for i, nodeRef := range m.nodeRefs {
+		if lineCount >= maxLines {
+			break
+		}
+
+		if nodeRef.Type == "prometheus" || nodeRef.Type == "node_exporter" {
+			// Render prometheus and node_exporter (single indent)
+			if i == m.selectedNode {
+				nodeList.WriteString("  " + selectedStyle.Render("▶ "+nodeRef.DisplayName) + "\n")
+			} else {
+				nodeList.WriteString("    " + sourceHeaderStyle.Render(nodeRef.DisplayName) + "\n")
+			}
 		} else {
-			nodeList.WriteString("  " + m.nodes[i])
+			// Render prometheus_node (double indent)
+			if i == m.selectedNode {
+				nodeList.WriteString("  " + selectedStyle.Render("▶  "+nodeRef.DisplayName) + "\n")
+			} else {
+				nodeList.WriteString("     " + nodeRef.DisplayName + "\n")
+			}
 		}
-		// Add newline except for last item
-		if i < endIdx-1 {
-			nodeList.WriteString("\n")
-		}
+		lineCount++
 	}
 
 	nodeListBox := borderStyle.
 		Width(nodeListWidth).
-		Height(nodeListHeight).
-		Render(nodeList.String())
+		Height(min(lineCount+1, m.height-2)).
+		Render(strings.TrimSuffix(nodeList.String(), "\n"))
 
 	// Render tabs
 	var tabsView strings.Builder
@@ -193,26 +267,35 @@ func (m dashboardModel) View() string {
 	var content strings.Builder
 	content.WriteString(tabsView.String() + "\n\n")
 
-	switch m.selectedTab {
-	case 0: // CPU
-		content.WriteString(titleStyle.Render("CPU Cores") + "\n")
-		if len(m.cpuData) > 0 {
-			for i, data := range m.cpuData {
-				if len(data) > 0 {
-					latest := data[len(data)-1]
-					content.WriteString(fmt.Sprintf("Core %d: %.1f%% ", i, latest))
-					content.WriteString(m.renderSparkline(data) + "\n")
+	// Check if a source header is selected
+	isSourceHeaderSelected := len(m.nodeRefs) > 0 && m.selectedNode < len(m.nodeRefs) && m.nodeRefs[m.selectedNode].Type == "prometheus"
+
+	if isSourceHeaderSelected {
+		// Render blank content for source headers
+		content.WriteString("\n")
+	} else {
+		// Render normal content for nodes
+		switch m.selectedTab {
+		case 0: // CPU
+			content.WriteString(titleStyle.Render("CPU Cores") + "\n")
+			if len(m.cpuData) > 0 {
+				for i, data := range m.cpuData {
+					if len(data) > 0 {
+						latest := data[len(data)-1]
+						content.WriteString(fmt.Sprintf("Core %d: %.1f%% ", i, latest))
+						content.WriteString(m.renderSparkline(data) + "\n")
+					}
 				}
+			} else {
+				content.WriteString("No CPU data available\n")
 			}
-		} else {
-			content.WriteString("No CPU data available\n")
+		case 1: // Memory
+			content.WriteString("Memory metrics coming soon...\n")
+		case 2: // Disk
+			content.WriteString("Disk metrics coming soon...\n")
+		case 3: // Network
+			content.WriteString("Network metrics coming soon...\n")
 		}
-	case 1: // Memory
-		content.WriteString("Memory metrics coming soon...\n")
-	case 2: // Disk
-		content.WriteString("Disk metrics coming soon...\n")
-	case 3: // Network
-		content.WriteString("Network metrics coming soon...\n")
 	}
 
 	contentWidth := m.width - nodeListWidth - 6
@@ -255,8 +338,8 @@ func (m dashboardModel) renderSparkline(data []float64) string {
 	return result.String()
 }
 
-func Dashboard(cache Cache) {
-	m := NewDashboard(cache)
+func Dashboard(sources []Cache, sourceNames []string) {
+	m := NewDashboard(sources, sourceNames)
 	p := tea.NewProgram(m, tea.WithAltScreen())
 
 	if _, err := p.Run(); err != nil {
