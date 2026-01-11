@@ -2,3 +2,4 @@ dist/
 promtop
 .task
 *.log
+.claude/

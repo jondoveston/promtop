@@ -7,7 +7,7 @@ code in this repository.
 
 `promtop` is a terminal-based dashboard application for monitoring system
 metrics from Prometheus or directly from node_exporter. Built with Go and
-termui, it displays real-time CPU, memory, disk, and network metrics in an
+Bubble Tea, it displays real-time CPU, memory, disk, and network metrics in an
 interactive terminal interface.
 
 ## Build & Run
@@ -33,19 +33,29 @@ task install
 
 ### Running the Application
 
-The application requires either a Prometheus URL or node_exporter URL:
+The application accepts one or more URLs as positional arguments. Each URL can
+point to either a Prometheus server or a node_exporter endpoint. The backend
+type is automatically detected for each URL.
 
 ```bash
-# Run with Prometheus backend
-PROMTOP_PROMETHEUS_URL=http://prometheus.lan:9090 ./promtop
+# Single Prometheus source
+./promtop http://prometheus.lan:9090
 
-# Run with node_exporter backend (direct metrics)
-PROMTOP_NODE_EXPORTER_URL=http://localhost:9100/metrics ./promtop
+# Single node_exporter source
+./promtop http://localhost:9100/metrics
+
+# Multiple sources (mixed types supported)
+./promtop http://prometheus.lan:9090 http://localhost:9100/metrics
 
 # Or use the task shortcuts
-task run_prom
-task run_node
+task run_prom    # Single Prometheus
+task run_node    # Single node_exporter
+task run         # Multiple sources
 ```
+
+URLs must use HTTP or HTTPS scheme and include a host. The application will
+attempt to connect to each URL, trying Prometheus first, then falling back to
+node_exporter if Prometheus detection fails.
 
 ## Architecture
 
@@ -54,27 +64,50 @@ task run_node
 The application uses an interface-based design to support multiple metric
 backends:
 
-- **`Data` interface** (`internal/cache.go`): Defines `GetCpu()` and
-  `GetNodes()` methods
+- **`Data` interface** (`internal/cache.go`): Defines `GetCpu()`, `GetNodes()`,
+  `Check()`, and `GetType()` methods
 - **`PrometheusData`** (`internal/prometheus_data.go`): Queries Prometheus API
-  using PromQL
+  using PromQL, returns type "prometheus"
 - **`NodeExporterData`** (`internal/node_exporter_data.go`): Scrapes
-  node_exporter `/metrics` endpoint directly
+  node_exporter `/metrics` endpoint directly, returns type "node_exporter"
 - **`Cache`** (`internal/cache.go`): Wraps Data implementations with caching for
   node lists
 
-The main function (`main.go`) selects the appropriate backend based on
-environment variables.
+The main function (`main.go`) uses Cobra for CLI argument parsing. For each
+provided URL, it:
+
+1. Parses and validates the URL (scheme, host)
+2. Creates a Prometheus client and calls `Check()`
+3. Falls back to node_exporter if Prometheus check fails
+4. Wraps each successful Data source in a Cache
+5. Passes all sources to the Dashboard
+
+### Multiple Source Support
+
+When multiple URLs are provided, nodes from all sources are displayed in a
+unified interface:
+
+- Prometheus sources show as selectable orange headers with nodes listed beneath
+- Node_exporter sources show as single-line entries with orange styling
+- Each node tracks its source via a `NodeRef` structure containing `Type`,
+  `SourceIndex`, `SourceName`, `NodeName`, and `DisplayName`
+- Node types: `"prometheus"` (source header), `"prometheus_node"` (individual
+  Prometheus target), `"node_exporter"` (direct node_exporter)
 
 ### UI Architecture
 
-The dashboard (`internal/dashboard.go`) uses gizak/termui v3:
+The dashboard (`internal/dashboard.go`) uses Bubble Tea and Lipgloss:
 
-- Left panel: scrollable list of nodes
+- Left panel: scrollable list of sources and nodes with color-coded headers
 - Right panel: tabbed interface (CPU, Memory, Disk, Network)
-- CPU tab displays per-core usage graphs that update every second
-- Vim-style keybindings (j/k for scrolling, h/l for tab switching, g/G for
-  top/bottom)
+- CPU tab displays per-core usage with sparkline graphs that update every second
+- Selecting a Prometheus source header shows a blank panel
+- Vim-style keybindings:
+  - `j`/`k` or arrows: navigate nodes
+  - `h`/`l` or arrows: switch tabs
+  - `g`/`G`: jump to top/bottom
+  - `Ctrl+d`/`Ctrl+u`: scroll by 5 items
+  - `q` or `Ctrl+c`: quit
 
 ### CPU Metrics Calculation
 
@@ -88,18 +121,23 @@ to calculate CPU usage from idle time.
 - Handles counter resets by tracking offsets
 - Calculates usage as `100 - 100*(idle_delta)/interval`
 
-## Configuration
+## CLI Interface
 
-Configuration is handled via Viper with environment variable support:
+Command-line interface built with Cobra:
 
-- Prefix: `PROMTOP_`
-- `PROMTOP_PROMETHEUS_URL`: Prometheus server URL
-- `PROMTOP_NODE_EXPORTER_URL`: node_exporter metrics endpoint (default:
-  `http://localhost:9100/metrics`)
+```
+Usage:
+  promtop <url> [url...]
 
-At least one URL must be set. If both are set, Prometheus takes precedence.
+Flags:
+  -v, --version   Print version information
+```
+
+URLs are validated before connection attempts. Invalid URLs (missing scheme,
+missing host, non-HTTP/HTTPS) cause immediate error exit.
 
 ## Logging
 
-Application logs to `promtop.log` in the current directory. Check this file for
-debugging connection issues or metric parsing errors.
+Application logs to `promtop.log` in the current directory via stderr
+redirection (see Taskfile). Check this file for debugging connection issues,
+metric parsing errors, or backend detection results.

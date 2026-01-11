@@ -4,6 +4,7 @@ type Data interface {
 	GetCpu(string) []float64
 	GetNodes() []string
 	Check() error
+	GetType() string // Returns "prometheus" or "node_exporter"
 }
 
 type Cache struct {

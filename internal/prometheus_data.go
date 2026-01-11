@@ -106,3 +106,7 @@ func (p *PrometheusData) GetCpu(node string) []float64 {
 	}
 	return cpus
 }
+
+func (p *PrometheusData) GetType() string {
+	return "prometheus"
+}
