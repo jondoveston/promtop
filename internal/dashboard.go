@@ -187,25 +187,31 @@ func (m dashboardModel) View() string {
 		return "Initializing..."
 	}
 
-	// Styles
-	borderStyle := lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color("240"))
-
-	selectedStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("170")).
-		Bold(true)
-
-	titleStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("33")).
-		Bold(true)
-
-	sourceHeaderStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("214")).
-		Bold(true)
-
 	// Calculate dimensions
-	// Calculate minimum width based on longest node name and source name
+	nodeListWidth := m.calculateNodeListWidth()
+	contentWidth := m.width - nodeListWidth - 6
+
+	// Build node list content
+	nodeListContent := m.renderNodeList()
+
+	// Build tabs and content
+	tabsContent := m.renderTabs()
+	metricsContent := m.renderMetrics()
+	contentStr := tabsContent + "\n\n" + metricsContent
+
+	// Create panes
+	nodePane := NewPane("Nodes", nodeListWidth, m.height-2).
+		SetContent(nodeListContent)
+
+	contentPane := NewPane("", contentWidth, m.height-2).
+		SetContent(contentStr)
+
+	// Combine panes horizontally
+	return Horizontal(nodePane, contentPane)
+}
+
+// calculateNodeListWidth calculates the minimum width for the node list pane
+func (m dashboardModel) calculateNodeListWidth() int {
 	nodeListWidth := 1 // minimum width
 	for _, nodeRef := range m.nodeRefs {
 		// All items: "  " + "▶ " + name (when selected) or "    " + name (when not)
@@ -216,15 +222,23 @@ func (m dashboardModel) View() string {
 		}
 	}
 	// Add border padding
-	nodeListWidth += 1
+	return nodeListWidth + 1
+}
 
-	// Render node list
+// renderNodeList builds the node list content string
+func (m dashboardModel) renderNodeList() string {
+	selectedStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("170")).
+		Bold(true)
+
+	sourceHeaderStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("214")).
+		Bold(true)
+
 	var nodeList strings.Builder
-	nodeList.WriteString(titleStyle.Render("Nodes") + "\n")
-
-	lineCount := 1 // Start at 1 for title
 	maxLines := m.height - 3
 
+	lineCount := 0
 	for i, nodeRef := range m.nodeRefs {
 		if lineCount >= maxLines {
 			break
@@ -248,12 +262,15 @@ func (m dashboardModel) View() string {
 		lineCount++
 	}
 
-	nodeListBox := borderStyle.
-		Width(nodeListWidth).
-		Height(min(lineCount+1, m.height-2)).
-		Render(strings.TrimSuffix(nodeList.String(), "\n"))
+	return strings.TrimSuffix(nodeList.String(), "\n")
+}
 
-	// Render tabs
+// renderTabs builds the tab navigation string
+func (m dashboardModel) renderTabs() string {
+	selectedStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("170")).
+		Bold(true)
+
 	var tabsView strings.Builder
 	for i, tab := range m.tabs {
 		if i == m.selectedTab {
@@ -263,49 +280,49 @@ func (m dashboardModel) View() string {
 		}
 	}
 
-	// Render content based on selected tab
-	var content strings.Builder
-	content.WriteString(tabsView.String() + "\n\n")
+	return tabsView.String()
+}
+
+// renderMetrics builds the metrics content based on selected tab
+func (m dashboardModel) renderMetrics() string {
+	titleStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("33")).
+		Bold(true)
 
 	// Check if a source header is selected
 	isSourceHeaderSelected := len(m.nodeRefs) > 0 && m.selectedNode < len(m.nodeRefs) && m.nodeRefs[m.selectedNode].Type == "prometheus"
 
 	if isSourceHeaderSelected {
 		// Render blank content for source headers
-		content.WriteString("\n")
-	} else {
-		// Render normal content for nodes
-		switch m.selectedTab {
-		case 0: // CPU
-			content.WriteString(titleStyle.Render("CPU Cores") + "\n")
-			if len(m.cpuData) > 0 {
-				for i, data := range m.cpuData {
-					if len(data) > 0 {
-						latest := data[len(data)-1]
-						content.WriteString(fmt.Sprintf("Core %d: %.1f%% ", i, latest))
-						content.WriteString(m.renderSparkline(data) + "\n")
-					}
-				}
-			} else {
-				content.WriteString("No CPU data available\n")
-			}
-		case 1: // Memory
-			content.WriteString("Memory metrics coming soon...\n")
-		case 2: // Disk
-			content.WriteString("Disk metrics coming soon...\n")
-		case 3: // Network
-			content.WriteString("Network metrics coming soon...\n")
-		}
+		return "\n"
 	}
 
-	contentWidth := m.width - nodeListWidth - 6
-	contentBox := borderStyle.
-		Width(contentWidth).
-		Height(m.height - 2).
-		Render(content.String())
+	// Render normal content for nodes
+	var content strings.Builder
 
-	// Combine node list and content side by side
-	return lipgloss.JoinHorizontal(lipgloss.Top, nodeListBox, contentBox)
+	switch m.selectedTab {
+	case 0: // CPU
+		content.WriteString(titleStyle.Render("CPU Cores") + "\n")
+		if len(m.cpuData) > 0 {
+			for i, data := range m.cpuData {
+				if len(data) > 0 {
+					latest := data[len(data)-1]
+					content.WriteString(fmt.Sprintf("Core %d: %.1f%% ", i, latest))
+					content.WriteString(m.renderSparkline(data) + "\n")
+				}
+			}
+		} else {
+			content.WriteString("No CPU data available\n")
+		}
+	case 1: // Memory
+		content.WriteString("Memory metrics coming soon...\n")
+	case 2: // Disk
+		content.WriteString("Disk metrics coming soon...\n")
+	case 3: // Network
+		content.WriteString("Network metrics coming soon...\n")
+	}
+
+	return content.String()
 }
 
 // renderSparkline creates a simple sparkline visualization
