@@ -20,15 +20,15 @@ tasks:
 
   run_prom:
     deps: [build]
-    cmd: ./{{ .APP }} https://prometheus.doveston.me.uk 2>promtop.log
+    cmd: ./{{ .APP }} prometheus.doveston.me.uk 2>promtop.log
 
   run_node:
     deps: [build]
-    cmd: ./{{ .APP }} http://localhost:9100/metrics 2>promtop.log
+    cmd: ./{{ .APP }} localhost 2>promtop.log
 
   run:
     deps: [build]
-    cmd: ./{{ .APP }} https://prometheus.doveston.me.uk http://localhost:9100/metrics 2>promtop.log
+    cmd: ./{{ .APP }} prometheus.doveston.me.uk localhost 2>promtop.log
 
   clean:
     cmd: rm -f {{ .APP }}
