@@ -83,7 +83,14 @@ func (p *PrometheusData) GetCpu(node string) map[string]float64 {
 	v1api := v1.NewAPI(p.client)
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	result, warnings, err := v1api.Query(ctx, "100 - (avg by (instance,cpu) (rate(node_cpu_seconds_total{instance=\""+node+"\",job=\"node_exporter\",mode=\"idle\"}[1m])) * 100)", time.Now())
+
+	query := fmt.Sprintf(
+		"100 - (avg by (instance,cpu) (rate(node_cpu_seconds_total{instance=\"%s\",job=\"node_exporter\",mode=\"idle\"}[%s])) * 100)",
+		node,
+		CPURateIntervalString(),
+	)
+
+	result, warnings, err := v1api.Query(ctx, query, time.Now())
 	if err != nil {
 		log.Fatalf("Error querying Prometheus: %v", err)
 	}

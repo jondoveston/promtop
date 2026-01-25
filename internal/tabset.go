@@ -69,6 +69,14 @@ func (ts *TabSet) GetCharts() []Chart {
 	return ts.charts
 }
 
+// GetChartPointer returns a pointer to a chart at the given index
+func (ts *TabSet) GetChartPointer(index int) *Chart {
+	if index >= 0 && index < len(ts.charts) {
+		return &ts.charts[index]
+	}
+	return nil
+}
+
 // GetSelectedTab returns the currently selected tab index
 func (ts *TabSet) GetSelectedTab() int {
 	return ts.selectedTab
