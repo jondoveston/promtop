@@ -4,5 +4,5 @@ package promtop
 type Chart struct {
 	NodeRef   NodeRef
 	ChartType string // "cpu", "memory", "disk", "network"
-	CpuData   [][]float64
+	CpuData   map[string][]float64 // CPU name -> time series
 }

@@ -105,7 +105,7 @@ func (n *NodeExporterData) GetNodes() []string {
 	return keys
 }
 
-func (n *NodeExporterData) GetCpu(node string) []float64 {
+func (n *NodeExporterData) GetCpu(node string) map[string]float64 {
 	client := http.Client{
 		Timeout: 5 * time.Second,
 	}
@@ -157,7 +157,7 @@ func (n *NodeExporterData) GetCpu(node string) []float64 {
 	}
 
 	// calculate the cpu usage rates
-	rates := []float64{}
+	rates := make(map[string]float64)
 	if len(n.cpus) < 2 {
 		return rates
 	}
@@ -165,6 +165,15 @@ func (n *NodeExporterData) GetCpu(node string) []float64 {
 	// calculate the interval between the first and last reading
 	interval := n.timestamps[len(n.timestamps)-1].Sub(n.timestamps[0]).Seconds()
 	for cpuIndex := 0; cpuIndex < len(n.cpus[0]); cpuIndex++ {
+		// Get the CPU name from the metric labels
+		var cpuName string
+		for _, label := range n.cpus[0][cpuIndex].GetLabel() {
+			if label.GetName() == "cpu" {
+				cpuName = label.GetValue()
+				break
+			}
+		}
+
 		// each cpu counter might have been reset so we need to calculate an offset
 		offset := 0.0
 		for readingIndex, reading := range n.cpus {
@@ -177,7 +186,7 @@ func (n *NodeExporterData) GetCpu(node string) []float64 {
 		last := n.cpus[len(n.cpus)-1][cpuIndex].GetCounter().GetValue() + offset
 		// because the times should add up to the interval
 		// we can calculate the cpu usage rate by subtracting the idle time from 100%
-		rates = append(rates, 100-100*(last-first)/interval)
+		rates[cpuName] = 100 - 100*(last-first)/interval
 	}
 
 	return rates
