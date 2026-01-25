@@ -9,6 +9,8 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/lipgloss/table"
+	"github.com/charmbracelet/lipgloss/tree"
 )
 
 type NodeRef struct {
@@ -20,16 +22,21 @@ type NodeRef struct {
 }
 
 type dashboardModel struct {
-	sources      []Cache
-	sourceNames  []string
-	nodeRefs     []NodeRef
-	selectedNode int
-	selectedTab  int
-	tabs         []string
-	cpuData      [][]float64
-	width        int
-	height       int
-	ready        bool
+	sources        []Cache
+	sourceNames    []string
+	nodeRefs       []NodeRef
+	selectedNode   int
+	selectedPane   int // Index of selected pane (TabSet)
+	selectedTab    int
+	tabs           []string
+	cpuData        [][]float64
+	activePanes    []*TabSet // Each pane can contain multiple tabbed charts
+	showModal      bool      // true = modal open, false = modal closed
+	modalNewPane   bool      // true = create new pane, false = add to current pane
+	modalChartType string    // Chart type being added in modal
+	width          int
+	height         int
+	ready          bool
 }
 
 type tickMsg time.Time
@@ -45,9 +52,11 @@ func NewDashboard(sources []Cache, sourceNames []string) *dashboardModel {
 		sources:      sources,
 		sourceNames:  sourceNames,
 		selectedNode: 0,
+		selectedPane: 0,
 		selectedTab:  0,
 		tabs:         []string{"CPU", "Memory", "Disk", "Network"},
 		cpuData:      make([][]float64, 0),
+		activePanes:  make([]*TabSet, 0),
 	}
 	m.nodeRefs = m.refreshNodes()
 	return m
@@ -107,30 +116,147 @@ func (m dashboardModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		switch msg.String() {
 		case "ctrl+c", "q":
 			return m, tea.Quit
+		case "esc":
+			// Close modal if open
+			if m.showModal {
+				m.showModal = false
+				m.modalNewPane = false
+				m.modalChartType = ""
+			}
+		case "n":
+			if m.showModal {
+				// Add Network chart for selected node (from modal)
+				m = m.addChart("network")
+				m.showModal = false
+				m.modalNewPane = false
+			} else if len(m.activePanes) < 9 {
+				// Open modal to add new pane
+				m.showModal = true
+				m.modalNewPane = true
+			}
+		case "a":
+			if m.showModal {
+				// Add all chart types for selected node (from modal)
+				m = m.addChart("cpu")
+				m = m.addChart("memory")
+				m = m.addChart("disk")
+				m = m.addChart("network")
+				m.showModal = false
+				m.modalNewPane = false
+			} else {
+				// Open modal to add charts to current pane
+				m.showModal = true
+				m.modalNewPane = false
+			}
 		case "j", "down":
-			if m.selectedNode < len(m.nodeRefs)-1 {
-				m.selectedNode++
+			if m.showModal {
+				// Navigate nodes in modal
+				if m.selectedNode < len(m.nodeRefs)-1 {
+					m.selectedNode++
+				}
+			} else {
+				// Navigate panes in grid
+				columns := m.getGridColumns()
+				if m.selectedPane+columns < len(m.activePanes) {
+					m.selectedPane += columns
+				}
 			}
 		case "k", "up":
-			if m.selectedNode > 0 {
-				m.selectedNode--
+			if m.showModal {
+				// Navigate nodes in modal
+				if m.selectedNode > 0 {
+					m.selectedNode--
+				}
+			} else {
+				// Navigate panes in grid
+				columns := m.getGridColumns()
+				if m.selectedPane-columns >= 0 {
+					m.selectedPane -= columns
+				}
 			}
 		case "h", "left":
-			if m.selectedTab > 0 {
-				m.selectedTab--
+			if !m.showModal {
+				// Navigate panes in grid
+				if m.selectedPane > 0 {
+					m.selectedPane--
+				}
 			}
 		case "l", "right":
-			if m.selectedTab < len(m.tabs)-1 {
-				m.selectedTab++
+			if !m.showModal {
+				// Navigate panes in grid
+				if m.selectedPane < len(m.activePanes)-1 {
+					m.selectedPane++
+				}
+			}
+		case "[":
+			// Previous tab in current pane
+			if !m.showModal && len(m.activePanes) > 0 && m.selectedPane < len(m.activePanes) {
+				m.activePanes[m.selectedPane].PrevTab()
+			}
+		case "]":
+			// Next tab in current pane
+			if !m.showModal && len(m.activePanes) > 0 && m.selectedPane < len(m.activePanes) {
+				m.activePanes[m.selectedPane].NextTab()
 			}
 		case "g":
-			m.selectedNode = 0
+			if m.showModal {
+				m.selectedNode = 0
+			} else {
+				m.selectedPane = 0
+			}
 		case "G":
-			m.selectedNode = len(m.nodeRefs) - 1
+			if m.showModal {
+				m.selectedNode = len(m.nodeRefs) - 1
+			} else {
+				m.selectedPane = len(m.activePanes) - 1
+			}
 		case "ctrl+d":
-			m.selectedNode = min(m.selectedNode+5, len(m.nodeRefs)-1)
+			if m.showModal {
+				m.selectedNode = min(m.selectedNode+5, len(m.nodeRefs)-1)
+			}
 		case "ctrl+u":
-			m.selectedNode = max(m.selectedNode-5, 0)
+			if m.showModal {
+				m.selectedNode = max(m.selectedNode-5, 0)
+			}
+		case "c":
+			// Add CPU chart for selected node (from modal)
+			if m.showModal {
+				m = m.addChart("cpu")
+				m.showModal = false
+				m.modalNewPane = false
+			}
+		case "m":
+			// Add Memory chart for selected node (from modal)
+			if m.showModal {
+				m = m.addChart("memory")
+				m.showModal = false
+				m.modalNewPane = false
+			}
+		case "s":
+			// Add Storage/Disk chart for selected node (from modal)
+			if m.showModal {
+				m = m.addChart("disk")
+				m.showModal = false
+				m.modalNewPane = false
+			}
+		case "x":
+			// Remove current tab, or pane if only one tab left
+			if !m.showModal && len(m.activePanes) > 0 && m.selectedPane < len(m.activePanes) {
+				selectedPane := m.activePanes[m.selectedPane]
+				charts := selectedPane.GetCharts()
+
+				if len(charts) > 1 {
+					// Remove current tab from pane
+					selectedPane.RemoveCurrentTab()
+				} else {
+					// Only one tab left, remove entire pane
+					m.activePanes = append(m.activePanes[:m.selectedPane], m.activePanes[m.selectedPane+1:]...)
+					// Bounds check selectedPane
+					if m.selectedPane >= len(m.activePanes) {
+						m.selectedPane = max(0, len(m.activePanes)-1)
+					}
+				}
+			}
 		}
 
 	case tea.WindowSizeMsg:
@@ -147,32 +273,31 @@ func (m dashboardModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.selectedNode = max(0, len(m.nodeRefs)-1)
 		}
 
-		// Update CPU data for selected node (skip if source header is selected)
-		if len(m.nodeRefs) > 0 && m.selectedNode < len(m.nodeRefs) {
-			selectedRef := m.nodeRefs[m.selectedNode]
+		// Update CPU data for all charts in all panes
+		maxDataPoints := max(m.width-40, 20)
+		for _, pane := range m.activePanes {
+			charts := pane.GetCharts()
+			for i := range charts {
+				chart := &charts[i]
+				if chart.ChartType == "cpu" {
+					cpus := m.sources[chart.NodeRef.SourceIndex].GetCpu(chart.NodeRef.NodeName)
 
-			// Only fetch CPU data if a node is selected (not a prometheus)
-			if selectedRef.Type != "prometheus" {
-				cpus := m.sources[selectedRef.SourceIndex].GetCpu(selectedRef.NodeName)
+					// Initialize CPU data if needed
+					if len(chart.CpuData) != len(cpus) {
+						chart.CpuData = make([][]float64, len(cpus))
+						for j := range chart.CpuData {
+							chart.CpuData[j] = []float64{}
+						}
+					}
 
-				// Initialize CPU data if needed
-				if len(m.cpuData) != len(cpus) {
-					m.cpuData = make([][]float64, len(cpus))
-					for i := range m.cpuData {
-						m.cpuData[i] = []float64{}
+					// Append new data and trim
+					for j, c := range cpus {
+						chart.CpuData[j] = append(chart.CpuData[j], c)
+						if len(chart.CpuData[j]) > maxDataPoints {
+							chart.CpuData[j] = chart.CpuData[j][len(chart.CpuData[j])-maxDataPoints:]
+						}
 					}
 				}
-
-				// Append new data and trim
-				maxDataPoints := max(m.width-40, 20)
-				for i, c := range cpus {
-					m.cpuData[i] = append(m.cpuData[i], c)
-					if len(m.cpuData[i]) > maxDataPoints {
-						m.cpuData[i] = m.cpuData[i][len(m.cpuData[i])-maxDataPoints:]
-					}
-				}
-
-				// log.Printf("Updated CPU data: %d cores, %d data points", len(cpus), len(m.cpuData[0]))
 			}
 		}
 
@@ -182,30 +307,193 @@ func (m dashboardModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+// getGridColumns returns the number of columns in the current grid layout
+func (m dashboardModel) getGridColumns() int {
+	if len(m.activePanes) == 1 {
+		return 1
+	} else if len(m.activePanes) <= 4 {
+		return 2
+	} else {
+		return 3
+	}
+}
+
+// addChart adds a chart of the specified type for the currently selected node
+// Adds to the currently selected pane if one exists, otherwise creates a new pane
+// This allows mixing charts from different sources in the same pane
+func (m dashboardModel) addChart(chartType string) dashboardModel {
+	if m.selectedNode >= len(m.nodeRefs) {
+		return m
+	}
+
+	selectedRef := m.nodeRefs[m.selectedNode]
+
+	// Don't add if it's a prometheus header
+	if selectedRef.Type == "prometheus" {
+		return m
+	}
+
+	// Create the new chart
+	newChart := Chart{
+		NodeRef:   selectedRef,
+		ChartType: chartType,
+		CpuData:   make([][]float64, 0),
+	}
+
+	// If modalNewPane is true, always create a new pane
+	if m.modalNewPane || len(m.activePanes) == 0 {
+		// Create new pane if we haven't reached the limit
+		if len(m.activePanes) < 9 {
+			newPane := NewTabSet().AddChart(newChart)
+			m.activePanes = append(m.activePanes, newPane)
+			m.selectedPane = len(m.activePanes) - 1 // Auto-select the new pane
+		}
+	} else if m.selectedPane < len(m.activePanes) {
+		// Add to currently selected pane
+		selectedPane := m.activePanes[m.selectedPane]
+
+		// Check if this exact chart already exists (same node + same chart type)
+		charts := selectedPane.GetCharts()
+		for _, chart := range charts {
+			if chart.NodeRef.SourceIndex == selectedRef.SourceIndex &&
+				chart.NodeRef.NodeName == selectedRef.NodeName &&
+				chart.ChartType == chartType {
+				// Exact duplicate, don't add
+				return m
+			}
+		}
+
+		// Add chart to selected pane
+		selectedPane.AddChart(newChart)
+	}
+
+	return m
+}
+
 func (m dashboardModel) View() string {
 	if !m.ready {
 		return "Initializing..."
 	}
 
-	// Styles
-	borderStyle := lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color("240"))
+	var baseView string
 
-	selectedStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("170")).
-		Bold(true)
+	// Render active panes or show instructions
+	if len(m.activePanes) == 0 {
+		// Show instructions when no charts are active
+		helpStyle := lipgloss.NewStyle().
+			Foreground(lipgloss.Color("240")).
+			Padding(2, 4)
 
-	titleStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("33")).
-		Bold(true)
+		baseView = helpStyle.Render(
+			"No charts active\n\n" +
+				"Press 'n' to add a new pane\n" +
+				"Press 'hjkl' or arrow keys to navigate\n\n" +
+				"Max 9 panes",
+		)
+	} else {
+		// Determine grid layout based on number of panes
+		var columns int
+		if len(m.activePanes) == 1 {
+			// 1 pane: use full space
+			columns = 1
+		} else if len(m.activePanes) <= 4 {
+			// 2-4 panes: 2x2 grid
+			columns = 2
+		} else {
+			// 5-9 panes: 3x3 grid
+			columns = 3
+		}
 
-	sourceHeaderStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("214")).
-		Bold(true)
+		// Calculate pane dimensions based on columns - use full screen width
+		// Account for help bar at bottom (2 lines)
+		availableHeight := m.height - 2
+		paneWidth := m.width/columns - 2
+		paneHeight := availableHeight/columns - 2
 
-	// Calculate dimensions
-	// Calculate minimum width based on longest node name and source name
+		// Create panes for each TabSet
+		var renderedPanes []Pane
+		for i, tabSet := range m.activePanes {
+			// Set TabSet dimensions to fit inside pane content area
+			// Account for: top border (1) + bottom border (1)
+			contentHeight := paneHeight - 2
+			tabSet.SetSize(paneWidth, contentHeight)
+
+			// Render the TabSet content (includes hostname above tabs)
+			content := tabSet.Render()
+
+			// Create pane without title (TabSet shows hostname)
+			pane := NewPane("", paneWidth, paneHeight).SetContent(content)
+
+			// Highlight selected pane
+			if i == m.selectedPane {
+				pane = pane.SetFocused(true)
+			}
+			renderedPanes = append(renderedPanes, pane)
+		}
+
+		// Wrap panes in a dynamic grid
+		panesView := Wrap(columns, renderedPanes...)
+
+		// Add status bar with help text
+		helpBar := lipgloss.NewStyle().
+			Foreground(lipgloss.Color("240")).
+			Background(lipgloss.Color("235")).
+			Width(m.width).
+			Align(lipgloss.Center).
+			Render("n=New Pane  a=Add to Pane  []=Switch Tabs  x=Remove  hjkl/arrows=Navigate  q=Quit")
+
+		baseView = panesView + "\n" + helpBar
+	}
+
+	// If modal is open, render it over the base view
+	if m.showModal {
+		return m.renderModal(baseView)
+	}
+
+	return baseView
+}
+
+// renderModal renders the modal dialog for adding a new chart
+func (m dashboardModel) renderModal(baseView string) string {
+	// Calculate modal dimensions (centered, 60% of screen)
+	modalWidth := int(float64(m.width) * 0.6)
+	modalHeight := int(float64(m.height) * 0.6)
+
+	// Build node list content
+	nodeListContent := m.renderNodeList()
+
+	// Create modal content with appropriate title based on mode
+	var modalTitle string
+	if m.modalNewPane {
+		modalTitle = "Select Node - Creating new pane"
+	} else {
+		modalTitle = "Select Node - Adding to current pane"
+	}
+	modalPane := NewPane(modalTitle, modalWidth, modalHeight).
+		SetContent(nodeListContent).
+		SetFocused(true)
+
+	// Create help text for modal
+	helpText := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("240")).
+		Render("c=CPU  m=Memory  s=Storage  n=Network  a=All Charts  ESC=Cancel")
+
+	modalContent := modalPane.Render() + "\n" + helpText
+
+	// Overlay modal on base view with semi-transparent background
+	return lipgloss.Place(
+		m.width,
+		m.height,
+		lipgloss.Center,
+		lipgloss.Center,
+		modalContent,
+		lipgloss.WithWhitespaceChars("░"),
+		lipgloss.WithWhitespaceForeground(lipgloss.Color("235")),
+	)
+}
+
+// calculateNodeListWidth calculates the minimum width for the node list pane
+func (m dashboardModel) calculateNodeListWidth() int {
 	nodeListWidth := 1 // minimum width
 	for _, nodeRef := range m.nodeRefs {
 		// All items: "  " + "▶ " + name (when selected) or "    " + name (when not)
@@ -216,126 +504,171 @@ func (m dashboardModel) View() string {
 		}
 	}
 	// Add border padding
-	nodeListWidth += 1
+	return nodeListWidth + 1
+}
 
-	// Render node list
-	var nodeList strings.Builder
-	nodeList.WriteString(titleStyle.Render("Nodes") + "\n")
+// renderNodeList builds the node list content string using lipgloss tree
+func (m dashboardModel) renderNodeList() string {
+	selectedStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("170")).
+		Bold(true)
 
-	lineCount := 1 // Start at 1 for title
-	maxLines := m.height - 3
+	sourceHeaderStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("214")).
+		Bold(true)
 
-	for i, nodeRef := range m.nodeRefs {
-		if lineCount >= maxLines {
-			break
-		}
+	normalStyle := lipgloss.NewStyle()
 
-		if nodeRef.Type == "prometheus" || nodeRef.Type == "node_exporter" {
-			// Render prometheus and node_exporter (single indent)
+	// Build tree structure
+	var trees []string
+
+	i := 0
+	for i < len(m.nodeRefs) {
+		nodeRef := m.nodeRefs[i]
+
+		if nodeRef.Type == "prometheus" {
+			// Create tree for prometheus source with child nodes
+			var rootLabel string
 			if i == m.selectedNode {
-				nodeList.WriteString("  " + selectedStyle.Render("▶ "+nodeRef.DisplayName) + "\n")
+				rootLabel = selectedStyle.Render("▶ " + nodeRef.DisplayName)
 			} else {
-				nodeList.WriteString("    " + sourceHeaderStyle.Render(nodeRef.DisplayName) + "\n")
+				rootLabel = sourceHeaderStyle.Render(nodeRef.DisplayName)
 			}
+
+			t := tree.New().Root(rootLabel)
+
+			// Add child nodes
+			i++
+			for i < len(m.nodeRefs) && m.nodeRefs[i].Type == "prometheus_node" && m.nodeRefs[i].SourceIndex == nodeRef.SourceIndex {
+				childRef := m.nodeRefs[i]
+				var childLabel string
+				if i == m.selectedNode {
+					childLabel = selectedStyle.Render("▶ " + childRef.DisplayName)
+				} else {
+					childLabel = normalStyle.Render(childRef.DisplayName)
+				}
+				t = t.Child(childLabel)
+				i++
+			}
+
+			trees = append(trees, t.String())
+
+		} else if nodeRef.Type == "node_exporter" {
+			// Create simple tree for node_exporter (no children)
+			var label string
+			if i == m.selectedNode {
+				label = selectedStyle.Render("▶ " + nodeRef.DisplayName)
+			} else {
+				label = sourceHeaderStyle.Render(nodeRef.DisplayName)
+			}
+			t := tree.New().Root(label)
+			trees = append(trees, t.String())
+			i++
 		} else {
-			// Render prometheus_node (double indent)
-			if i == m.selectedNode {
-				nodeList.WriteString("  " + selectedStyle.Render("▶  "+nodeRef.DisplayName) + "\n")
-			} else {
-				nodeList.WriteString("     " + nodeRef.DisplayName + "\n")
-			}
+			// Shouldn't happen, but skip if orphaned prometheus_node
+			i++
 		}
-		lineCount++
 	}
 
-	nodeListBox := borderStyle.
-		Width(nodeListWidth).
-		Height(min(lineCount+1, m.height-2)).
-		Render(strings.TrimSuffix(nodeList.String(), "\n"))
+	return strings.Join(trees, "\n")
+}
 
-	// Render tabs
-	var tabsView strings.Builder
+// renderTabs builds the tab navigation string with lipgloss styling
+func (m dashboardModel) renderTabs() string {
+	activeTabStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("170")).
+		Background(lipgloss.Color("235")).
+		Bold(true).
+		Padding(0, 2).
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(lipgloss.Color("170"))
+
+	inactiveTabStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("240")).
+		Padding(0, 2).
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(lipgloss.Color("236"))
+
+	var renderedTabs []string
 	for i, tab := range m.tabs {
 		if i == m.selectedTab {
-			tabsView.WriteString(selectedStyle.Render(" [" + tab + "] "))
+			renderedTabs = append(renderedTabs, activeTabStyle.Render(tab))
 		} else {
-			tabsView.WriteString(" " + tab + " ")
+			renderedTabs = append(renderedTabs, inactiveTabStyle.Render(tab))
 		}
 	}
 
-	// Render content based on selected tab
-	var content strings.Builder
-	content.WriteString(tabsView.String() + "\n\n")
+	return lipgloss.JoinHorizontal(lipgloss.Top, renderedTabs...)
+}
 
+// renderCPUMetrics renders CPU metrics content
+func (m dashboardModel) renderCPUMetrics() string {
 	// Check if a source header is selected
 	isSourceHeaderSelected := len(m.nodeRefs) > 0 && m.selectedNode < len(m.nodeRefs) && m.nodeRefs[m.selectedNode].Type == "prometheus"
 
 	if isSourceHeaderSelected {
-		// Render blank content for source headers
-		content.WriteString("\n")
-	} else {
-		// Render normal content for nodes
-		switch m.selectedTab {
-		case 0: // CPU
-			content.WriteString(titleStyle.Render("CPU Cores") + "\n")
-			if len(m.cpuData) > 0 {
-				for i, data := range m.cpuData {
-					if len(data) > 0 {
-						latest := data[len(data)-1]
-						content.WriteString(fmt.Sprintf("Core %d: %.1f%% ", i, latest))
-						content.WriteString(m.renderSparkline(data) + "\n")
-					}
-				}
-			} else {
-				content.WriteString("No CPU data available\n")
-			}
-		case 1: // Memory
-			content.WriteString("Memory metrics coming soon...\n")
-		case 2: // Disk
-			content.WriteString("Disk metrics coming soon...\n")
-		case 3: // Network
-			content.WriteString("Network metrics coming soon...\n")
-		}
+		return "Select a node to view metrics"
 	}
 
-	contentWidth := m.width - nodeListWidth - 6
-	contentBox := borderStyle.
-		Width(contentWidth).
-		Height(m.height - 2).
-		Render(content.String())
+	if len(m.cpuData) > 0 {
+		// Create table for CPU data
+		rows := [][]string{}
+		for i, data := range m.cpuData {
+			if len(data) > 0 {
+				latest := data[len(data)-1]
+				rows = append(rows, []string{
+					fmt.Sprintf("Core %d", i),
+					fmt.Sprintf("%.1f%%", latest),
+				})
+			}
+		}
 
-	// Combine node list and content side by side
-	return lipgloss.JoinHorizontal(lipgloss.Top, nodeListBox, contentBox)
+		t := table.New().
+			Border(lipgloss.NormalBorder()).
+			BorderStyle(lipgloss.NewStyle().Foreground(lipgloss.Color("240"))).
+			Headers("Core", "Usage").
+			Rows(rows...)
+
+		return t.String()
+	}
+
+	return "No CPU data available"
 }
 
-// renderSparkline creates a simple sparkline visualization
-func (m dashboardModel) renderSparkline(data []float64) string {
-	if len(data) == 0 {
-		return ""
+// renderMemoryMetrics renders memory metrics content
+func (m dashboardModel) renderMemoryMetrics() string {
+	// Check if a source header is selected
+	isSourceHeaderSelected := len(m.nodeRefs) > 0 && m.selectedNode < len(m.nodeRefs) && m.nodeRefs[m.selectedNode].Type == "prometheus"
+
+	if isSourceHeaderSelected {
+		return "Select a node to view metrics"
 	}
 
-	sparkChars := []rune{'▁', '▂', '▃', '▄', '▅', '▆', '▇', '█'}
+	return "Memory metrics coming soon..."
+}
 
-	var result strings.Builder
-	maxWidth := min(len(data), 50)
-	step := 1
-	if len(data) > maxWidth {
-		step = len(data) / maxWidth
+// renderDiskMetrics renders disk metrics content
+func (m dashboardModel) renderDiskMetrics() string {
+	// Check if a source header is selected
+	isSourceHeaderSelected := len(m.nodeRefs) > 0 && m.selectedNode < len(m.nodeRefs) && m.nodeRefs[m.selectedNode].Type == "prometheus"
+
+	if isSourceHeaderSelected {
+		return "Select a node to view metrics"
 	}
 
-	for i := 0; i < len(data); i += step {
-		val := data[i]
-		idx := int(val / 100.0 * float64(len(sparkChars)-1))
-		if idx < 0 {
-			idx = 0
-		}
-		if idx >= len(sparkChars) {
-			idx = len(sparkChars) - 1
-		}
-		result.WriteRune(sparkChars[idx])
+	return "Disk metrics coming soon..."
+}
+
+// renderNetworkMetrics renders network metrics content
+func (m dashboardModel) renderNetworkMetrics() string {
+	// Check if a source header is selected
+	isSourceHeaderSelected := len(m.nodeRefs) > 0 && m.selectedNode < len(m.nodeRefs) && m.nodeRefs[m.selectedNode].Type == "prometheus"
+
+	if isSourceHeaderSelected {
+		return "Select a node to view metrics"
 	}
 
-	return result.String()
+	return "Network metrics coming soon..."
 }
 
 func Dashboard(sources []Cache, sourceNames []string) {

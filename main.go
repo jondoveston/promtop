@@ -5,6 +5,7 @@ import (
 	"log"
 	"net/url"
 	"os"
+	"strings"
 
 	promtop "github.com/jondoveston/promtop/internal"
 	"github.com/spf13/cobra"
@@ -53,18 +54,23 @@ func init() {
 }
 
 func parseAndValidateURL(rawURL string) (*url.URL, error) {
+	// If no scheme provided, default to http (common for node exporters)
+	if !strings.Contains(rawURL, "://") {
+		rawURL = "http://" + rawURL
+	}
+
 	u, err := url.Parse(rawURL)
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse URL: %w", err)
 	}
 
-	// Validate scheme
-	if u.Scheme != "http" && u.Scheme != "https" {
+	// Validate scheme if provided
+	if u.Scheme != "" && u.Scheme != "http" && u.Scheme != "https" {
 		return nil, fmt.Errorf("URL must use http or https, got: %s", u.Scheme)
 	}
 
 	// Validate host
-	if u.Host == "" {
+	if u.Hostname() == "" {
 		return nil, fmt.Errorf("URL must have a host")
 	}
 
@@ -94,39 +100,17 @@ func run(cmd *cobra.Command, args []string) {
 			log.Fatalf("Invalid URL '%s': %v", rawURL, err)
 		}
 
-		// Derive source name from URL (hostname:port or just hostname)
-		sourceName := targetURL.Host
-
-		// Try Prometheus first, then node_exporter
-		var d promtop.Data
-
-		log.Printf("Trying Prometheus backend: %s", targetURL)
-		promData, err := promtop.NewPrometheusData(targetURL)
-		if err != nil {
-			log.Printf("Failed to create Prometheus client: %v", err)
-		} else if err := promData.Check(); err != nil {
-			log.Printf("Prometheus check failed: %v", err)
-		} else {
-			log.Printf("Using Prometheus backend for %s", sourceName)
-			d = promData
+		// Try to connect with fallbacks - returns multiple sources if both backends available
+		detectedSources := promtop.TryConnectWithFallbacks(targetURL)
+		if len(detectedSources) == 0 {
+			log.Fatalf("Failed to connect to %s with all fallback attempts", rawURL)
 		}
 
-		// Fallback to node_exporter if Prometheus failed
-		if d == nil {
-			log.Printf("Trying node_exporter backend: %s", targetURL)
-			nodeData, err := promtop.NewNodeExporterData([]*url.URL{targetURL})
-			if err != nil {
-				log.Fatalf("Failed to create node_exporter client for %s: %v", sourceName, err)
-			}
-			if err := nodeData.Check(); err != nil {
-				log.Fatalf("Node exporter check failed for %s: %v", sourceName, err)
-			}
-			log.Printf("Using node_exporter backend for %s", sourceName)
-			d = nodeData
+		// Add all detected sources
+		for _, ds := range detectedSources {
+			sources = append(sources, ds.Data)
+			sourceNames = append(sourceNames, ds.Name)
 		}
-
-		sources = append(sources, d)
-		sourceNames = append(sourceNames, sourceName)
 	}
 
 	// Wrap each source in a Cache for node list caching
