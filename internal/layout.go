@@ -89,3 +89,26 @@ func (g *GridLayout) Render() string {
 
 	return lipgloss.JoinVertical(lipgloss.Left, rowViews...)
 }
+
+// Wrap renders panes in a grid with automatic wrapping
+// panesPerRow specifies how many panes per row before wrapping
+// Example: Wrap(2, pane1, pane2, pane3, pane4) creates a 2x2 grid
+func Wrap(panesPerRow int, panes ...Pane) string {
+	if len(panes) == 0 || panesPerRow <= 0 {
+		return ""
+	}
+
+	var rows []string
+
+	for i := 0; i < len(panes); i += panesPerRow {
+		end := i + panesPerRow
+		if end > len(panes) {
+			end = len(panes)
+		}
+
+		rowPanes := panes[i:end]
+		rows = append(rows, Horizontal(rowPanes...))
+	}
+
+	return lipgloss.JoinVertical(lipgloss.Left, rows...)
+}
