@@ -8,18 +8,18 @@ import (
 // WrapTable wraps lipgloss table to support height-based wrapping
 // When data exceeds maxHeight, it creates multiple tables side-by-side
 type WrapTable struct {
-	headers   []string
-	rows      [][]string
-	maxHeight int
-	maxWidth  int
-	border    lipgloss.Border
+	headers     []string
+	rows        [][]string
+	maxHeight   int
+	maxWidth    int
+	border      lipgloss.Border
 	borderStyle lipgloss.Style
 }
 
 // NewWrapTable creates a new wrap table
 func NewWrapTable() *WrapTable {
 	return &WrapTable{
-		border: lipgloss.NormalBorder(),
+		border:      lipgloss.NormalBorder(),
 		borderStyle: lipgloss.NewStyle().Foreground(lipgloss.Color("240")),
 	}
 }
