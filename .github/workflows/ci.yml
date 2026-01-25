@@ -90,6 +90,8 @@ jobs:
       with:
         version: latest
         args: --timeout=5m
+        install-mode: binary
+        skip-cache: true
 
   format:
     name: Format Check
