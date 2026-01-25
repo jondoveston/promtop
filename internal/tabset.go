@@ -2,6 +2,8 @@ package promtop
 
 import (
 	"fmt"
+	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
@@ -65,6 +67,14 @@ func (ts *TabSet) PrevTab() *TabSet {
 // GetCharts returns all charts in the tab set
 func (ts *TabSet) GetCharts() []Chart {
 	return ts.charts
+}
+
+// GetChartPointer returns a pointer to a chart at the given index
+func (ts *TabSet) GetChartPointer(index int) *Chart {
+	if index >= 0 && index < len(ts.charts) {
+		return &ts.charts[index]
+	}
+	return nil
 }
 
 // GetSelectedTab returns the currently selected tab index
@@ -177,11 +187,28 @@ func (ts *TabSet) renderChartContent(chart Chart, width, height int) string {
 		if len(chart.CpuData) > 0 {
 			// Create table for CPU data
 			rows := [][]string{}
-			for i, data := range chart.CpuData {
+
+			// Sort CPU names for consistent display
+			cpuNames := make([]string, 0, len(chart.CpuData))
+			for cpuName := range chart.CpuData {
+				cpuNames = append(cpuNames, cpuName)
+			}
+			// Sort numerically by converting to int
+			sort.Slice(cpuNames, func(i, j int) bool {
+				numI, errI := strconv.Atoi(cpuNames[i])
+				numJ, errJ := strconv.Atoi(cpuNames[j])
+				if errI == nil && errJ == nil {
+					return numI < numJ
+				}
+				return cpuNames[i] < cpuNames[j]
+			})
+
+			for _, cpuName := range cpuNames {
+				data := chart.CpuData[cpuName]
 				if len(data) > 0 {
 					latest := data[len(data)-1]
 					rows = append(rows, []string{
-						fmt.Sprintf("Core %d", i),
+						fmt.Sprintf("Core %s", cpuName),
 						fmt.Sprintf("%.1f%%", latest),
 					})
 				}
@@ -199,7 +226,101 @@ func (ts *TabSet) renderChartContent(chart Chart, width, height int) string {
 			content.WriteString("Waiting for data...")
 		}
 	case "memory":
-		content.WriteString("Memory metrics coming soon...")
+		if chart.MemoryData != nil && len(chart.MemoryData) > 0 {
+			// Convert bytes to GB for display
+			toGB := func(bytes float64) float64 {
+				return bytes / (1024 * 1024 * 1024)
+			}
+
+			rows := [][]string{}
+
+			// Total memory
+			if total, ok := chart.MemoryData["total"]; ok {
+				rows = append(rows, []string{
+					"Total",
+					fmt.Sprintf("%.2f GB", toGB(total)),
+				})
+			}
+
+			// Used memory with percentage
+			if used, ok := chart.MemoryData["used"]; ok {
+				usedStr := fmt.Sprintf("%.2f GB", toGB(used))
+				if usedPct, ok := chart.MemoryData["used_percent"]; ok {
+					usedStr += fmt.Sprintf(" (%.1f%%)", usedPct)
+				}
+				rows = append(rows, []string{
+					"Used",
+					usedStr,
+				})
+			}
+
+			// Available memory (Linux)
+			if available, ok := chart.MemoryData["available"]; ok {
+				rows = append(rows, []string{
+					"Available",
+					fmt.Sprintf("%.2f GB", toGB(available)),
+				})
+			}
+
+			// Free memory
+			if free, ok := chart.MemoryData["free"]; ok {
+				rows = append(rows, []string{
+					"Free",
+					fmt.Sprintf("%.2f GB", toGB(free)),
+				})
+			}
+
+			// Cached memory (Linux)
+			if cached, ok := chart.MemoryData["cached"]; ok {
+				rows = append(rows, []string{
+					"Cached",
+					fmt.Sprintf("%.2f GB", toGB(cached)),
+				})
+			}
+
+			// Buffers (Linux)
+			if buffers, ok := chart.MemoryData["buffers"]; ok {
+				rows = append(rows, []string{
+					"Buffers",
+					fmt.Sprintf("%.2f GB", toGB(buffers)),
+				})
+			}
+
+			// Active memory (macOS)
+			if active, ok := chart.MemoryData["active"]; ok {
+				rows = append(rows, []string{
+					"Active",
+					fmt.Sprintf("%.2f GB", toGB(active)),
+				})
+			}
+
+			// Inactive memory (macOS)
+			if inactive, ok := chart.MemoryData["inactive"]; ok {
+				rows = append(rows, []string{
+					"Inactive",
+					fmt.Sprintf("%.2f GB", toGB(inactive)),
+				})
+			}
+
+			// Wired memory (macOS)
+			if wired, ok := chart.MemoryData["wired"]; ok {
+				rows = append(rows, []string{
+					"Wired",
+					fmt.Sprintf("%.2f GB", toGB(wired)),
+				})
+			}
+
+			// Use WrapTable to handle wrapping when content exceeds height
+			t := NewWrapTable().
+				BorderStyle(lipgloss.NewStyle().Foreground(lipgloss.Color("240"))).
+				MaxHeight(height).
+				Headers("Metric", "Value").
+				Rows(rows...)
+
+			content.WriteString(t.Render())
+		} else {
+			content.WriteString("Waiting for data...")
+		}
 	case "disk":
 		content.WriteString("Disk metrics coming soon...")
 	case "network":
