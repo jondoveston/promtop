@@ -107,6 +107,49 @@ func (p *PrometheusData) GetCpu(node string) []float64 {
 	return cpus
 }
 
+func (p *PrometheusData) GetMemory(node string) map[string]float64 {
+	v1api := v1.NewAPI(p.client)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	memory := make(map[string]float64)
+
+	// Get total memory
+	result, _, err := v1api.Query(ctx, fmt.Sprintf("node_memory_MemTotal_bytes{instance=\"%s\",job=\"node_exporter\"}", node), time.Now())
+	if err == nil && result.(model.Vector).Len() > 0 {
+		memory["total"] = float64(result.(model.Vector)[0].Value)
+	}
+
+	// Get available memory
+	result, _, err = v1api.Query(ctx, fmt.Sprintf("node_memory_MemAvailable_bytes{instance=\"%s\",job=\"node_exporter\"}", node), time.Now())
+	if err == nil && result.(model.Vector).Len() > 0 {
+		memory["available"] = float64(result.(model.Vector)[0].Value)
+	}
+
+	// Calculate used memory and percentage
+	if total, ok := memory["total"]; ok && total > 0 {
+		if available, ok := memory["available"]; ok {
+			used := total - available
+			memory["used"] = used
+			memory["used_percent"] = (used / total) * 100
+		}
+	}
+
+	// Get cached memory
+	result, _, err = v1api.Query(ctx, fmt.Sprintf("node_memory_Cached_bytes{instance=\"%s\",job=\"node_exporter\"}", node), time.Now())
+	if err == nil && result.(model.Vector).Len() > 0 {
+		memory["cached"] = float64(result.(model.Vector)[0].Value)
+	}
+
+	// Get buffer memory
+	result, _, err = v1api.Query(ctx, fmt.Sprintf("node_memory_Buffers_bytes{instance=\"%s\",job=\"node_exporter\"}", node), time.Now())
+	if err == nil && result.(model.Vector).Len() > 0 {
+		memory["buffers"] = float64(result.(model.Vector)[0].Value)
+	}
+
+	return memory
+}
+
 func (p *PrometheusData) GetType() string {
 	return "prometheus"
 }
