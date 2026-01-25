@@ -1,0 +1,65 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v[0-9]+.[0-9]+.[0-9]+'
+
+jobs:
+  release:
+    name: Create Release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Go
+      uses: actions/setup-go@v5
+      with:
+        go-version: '1.25'
+
+    - name: Get version from tag
+      id: get_version
+      run: |
+        TAG=${GITHUB_REF#refs/tags/}
+        VERSION=${TAG#v}
+        echo "VERSION=${VERSION}" >> $GITHUB_OUTPUT
+
+    - name: Build binaries
+      run: |
+        VERSION=${{ steps.get_version.outputs.VERSION }}
+
+        # Linux AMD64
+        GOOS=linux GOARCH=amd64 go build -ldflags="-X 'main.version=${VERSION}'" -o promtop-linux-amd64 main.go
+
+        # Linux ARM64
+        GOOS=linux GOARCH=arm64 go build -ldflags="-X 'main.version=${VERSION}'" -o promtop-linux-arm64 main.go
+
+        # macOS AMD64
+        GOOS=darwin GOARCH=amd64 go build -ldflags="-X 'main.version=${VERSION}'" -o promtop-darwin-amd64 main.go
+
+        # macOS ARM64
+        GOOS=darwin GOARCH=arm64 go build -ldflags="-X 'main.version=${VERSION}'" -o promtop-darwin-arm64 main.go
+
+    - name: Create checksums
+      run: |
+        sha256sum promtop-linux-amd64 > checksums.txt
+        sha256sum promtop-linux-arm64 >> checksums.txt
+        sha256sum promtop-darwin-amd64 >> checksums.txt
+        sha256sum promtop-darwin-arm64 >> checksums.txt
+
+    - name: Create Release
+      uses: softprops/action-gh-release@v1
+      with:
+        files: |
+          promtop-linux-amd64
+          promtop-linux-arm64
+          promtop-darwin-amd64
+          promtop-darwin-arm64
+          checksums.txt
+        generate_release_notes: true
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
