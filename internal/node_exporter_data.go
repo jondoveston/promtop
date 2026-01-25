@@ -183,6 +183,57 @@ func (n *NodeExporterData) GetCpu(node string) []float64 {
 	return rates
 }
 
+func (n *NodeExporterData) GetMemory(node string) map[string]float64 {
+	client := http.Client{
+		Timeout: 5 * time.Second,
+	}
+	resp, err := client.Get(n.nodes[node].String())
+	if err != nil {
+		log.Fatalln("Error querying node exporter:", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		log.Fatalln("Failed to read response body:", err)
+	}
+	parser := expfmt.TextParser{}
+	data, err := parser.TextToMetricFamilies(strings.NewReader(string(body)))
+	if err != nil {
+		log.Fatalln("Failed to parse metrics:", err)
+	}
+
+	memory := make(map[string]float64)
+
+	// Extract memory metrics
+	if memTotal, ok := data["node_memory_MemTotal_bytes"]; ok && len(memTotal.GetMetric()) > 0 {
+		memory["total"] = memTotal.GetMetric()[0].GetGauge().GetValue()
+	}
+
+	if memAvailable, ok := data["node_memory_MemAvailable_bytes"]; ok && len(memAvailable.GetMetric()) > 0 {
+		memory["available"] = memAvailable.GetMetric()[0].GetGauge().GetValue()
+	}
+
+	// Calculate used memory and percentage
+	if total, ok := memory["total"]; ok && total > 0 {
+		if available, ok := memory["available"]; ok {
+			used := total - available
+			memory["used"] = used
+			memory["used_percent"] = (used / total) * 100
+		}
+	}
+
+	if memCached, ok := data["node_memory_Cached_bytes"]; ok && len(memCached.GetMetric()) > 0 {
+		memory["cached"] = memCached.GetMetric()[0].GetGauge().GetValue()
+	}
+
+	if memBuffers, ok := data["node_memory_Buffers_bytes"]; ok && len(memBuffers.GetMetric()) > 0 {
+		memory["buffers"] = memBuffers.GetMetric()[0].GetGauge().GetValue()
+	}
+
+	return memory
+}
+
 func (n *NodeExporterData) GetType() string {
 	return "node_exporter"
 }
