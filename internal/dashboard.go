@@ -1,7 +1,6 @@
 package promtop
 
 import (
-	"fmt"
 	"log"
 	"sort"
 	"strings"
@@ -9,7 +8,6 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
-	"github.com/charmbracelet/lipgloss/table"
 	"github.com/charmbracelet/lipgloss/tree"
 )
 
@@ -492,21 +490,6 @@ func (m dashboardModel) renderModal(baseView string) string {
 	)
 }
 
-// calculateNodeListWidth calculates the minimum width for the node list pane
-func (m dashboardModel) calculateNodeListWidth() int {
-	nodeListWidth := 1 // minimum width
-	for _, nodeRef := range m.nodeRefs {
-		// All items: "  " + "▶ " + name (when selected) or "    " + name (when not)
-		// Maximum width is "  ▶ " + longest name
-		itemLen := len(nodeRef.DisplayName) + 5 // "  " + "▶ " + " " + 1 for padding
-		if itemLen > nodeListWidth {
-			nodeListWidth = itemLen
-		}
-	}
-	// Add border padding
-	return nodeListWidth + 1
-}
-
 // renderNodeList builds the node list content string using lipgloss tree
 func (m dashboardModel) renderNodeList() string {
 	selectedStyle := lipgloss.NewStyle().
@@ -571,104 +554,6 @@ func (m dashboardModel) renderNodeList() string {
 	}
 
 	return strings.Join(trees, "\n")
-}
-
-// renderTabs builds the tab navigation string with lipgloss styling
-func (m dashboardModel) renderTabs() string {
-	activeTabStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("170")).
-		Background(lipgloss.Color("235")).
-		Bold(true).
-		Padding(0, 2).
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color("170"))
-
-	inactiveTabStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("240")).
-		Padding(0, 2).
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color("236"))
-
-	var renderedTabs []string
-	for i, tab := range m.tabs {
-		if i == m.selectedTab {
-			renderedTabs = append(renderedTabs, activeTabStyle.Render(tab))
-		} else {
-			renderedTabs = append(renderedTabs, inactiveTabStyle.Render(tab))
-		}
-	}
-
-	return lipgloss.JoinHorizontal(lipgloss.Top, renderedTabs...)
-}
-
-// renderCPUMetrics renders CPU metrics content
-func (m dashboardModel) renderCPUMetrics() string {
-	// Check if a source header is selected
-	isSourceHeaderSelected := len(m.nodeRefs) > 0 && m.selectedNode < len(m.nodeRefs) && m.nodeRefs[m.selectedNode].Type == "prometheus"
-
-	if isSourceHeaderSelected {
-		return "Select a node to view metrics"
-	}
-
-	if len(m.cpuData) > 0 {
-		// Create table for CPU data
-		rows := [][]string{}
-		for i, data := range m.cpuData {
-			if len(data) > 0 {
-				latest := data[len(data)-1]
-				rows = append(rows, []string{
-					fmt.Sprintf("Core %d", i),
-					fmt.Sprintf("%.1f%%", latest),
-				})
-			}
-		}
-
-		t := table.New().
-			Border(lipgloss.NormalBorder()).
-			BorderStyle(lipgloss.NewStyle().Foreground(lipgloss.Color("240"))).
-			Headers("Core", "Usage").
-			Rows(rows...)
-
-		return t.String()
-	}
-
-	return "No CPU data available"
-}
-
-// renderMemoryMetrics renders memory metrics content
-func (m dashboardModel) renderMemoryMetrics() string {
-	// Check if a source header is selected
-	isSourceHeaderSelected := len(m.nodeRefs) > 0 && m.selectedNode < len(m.nodeRefs) && m.nodeRefs[m.selectedNode].Type == "prometheus"
-
-	if isSourceHeaderSelected {
-		return "Select a node to view metrics"
-	}
-
-	return "Memory metrics coming soon..."
-}
-
-// renderDiskMetrics renders disk metrics content
-func (m dashboardModel) renderDiskMetrics() string {
-	// Check if a source header is selected
-	isSourceHeaderSelected := len(m.nodeRefs) > 0 && m.selectedNode < len(m.nodeRefs) && m.nodeRefs[m.selectedNode].Type == "prometheus"
-
-	if isSourceHeaderSelected {
-		return "Select a node to view metrics"
-	}
-
-	return "Disk metrics coming soon..."
-}
-
-// renderNetworkMetrics renders network metrics content
-func (m dashboardModel) renderNetworkMetrics() string {
-	// Check if a source header is selected
-	isSourceHeaderSelected := len(m.nodeRefs) > 0 && m.selectedNode < len(m.nodeRefs) && m.nodeRefs[m.selectedNode].Type == "prometheus"
-
-	if isSourceHeaderSelected {
-		return "Select a node to view metrics"
-	}
-
-	return "Network metrics coming soon..."
 }
 
 func Dashboard(sources []Cache, sourceNames []string) {
