@@ -150,8 +150,9 @@ func (n *NodeExporterData) GetCpu(node string) map[string]float64 {
 	// append the new reading to the readings slice
 	n.cpus = append(n.cpus, currentCpu)
 	n.timestamps = append(n.timestamps, time.Now())
-	// limit the readings slice to 60 entries
-	if len(n.cpus) > 60 {
+	// limit the readings slice to MaxCPURecords entries
+	maxRecords := MaxCPURecords()
+	if len(n.cpus) > maxRecords {
 		n.cpus = n.cpus[1:]
 		n.timestamps = n.timestamps[1:]
 	}

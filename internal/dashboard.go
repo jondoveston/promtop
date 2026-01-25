@@ -40,7 +40,7 @@ type dashboardModel struct {
 type tickMsg time.Time
 
 func tickCmd() tea.Cmd {
-	return tea.Tick(time.Second, func(t time.Time) tea.Msg {
+	return tea.Tick(UpdateDuration(), func(t time.Time) tea.Msg {
 		return tickMsg(t)
 	})
 }
