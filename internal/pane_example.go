@@ -60,3 +60,24 @@ func MetricPane(title string, metrics map[string]string, width, height int) Pane
 	}
 	return NewPane(title, width, height).SetContent(content)
 }
+
+// FourPaneGrid demonstrates using Wrap to create a 2x2 grid of metric panes
+func FourPaneGrid(width, height int) string {
+	paneWidth := width / 2
+	paneHeight := height / 2
+
+	cpuPane := NewPane("CPU", paneWidth, paneHeight).
+		SetContent("Core 0: 45%\nCore 1: 23%")
+
+	memPane := NewPane("Memory", paneWidth, paneHeight).
+		SetContent("Used: 8.2GB / 16GB\n51% usage")
+
+	diskPane := NewPane("Disk", paneWidth, paneHeight).
+		SetContent("/ : 120GB / 256GB\n47% usage")
+
+	netPane := NewPane("Network", paneWidth, paneHeight).
+		SetContent("RX: 1.2 MB/s\nTX: 0.8 MB/s")
+
+	// Use Wrap to create 2x2 grid automatically
+	return Wrap(2, cpuPane, memPane, diskPane, netPane)
+}
