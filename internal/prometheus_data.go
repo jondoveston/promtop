@@ -5,8 +5,6 @@ import (
 	"fmt"
 	"log"
 	"net/url"
-	"sort"
-	"strconv"
 	"time"
 
 	"github.com/prometheus/client_golang/api"
@@ -81,7 +79,7 @@ func (p *PrometheusData) GetNodes() []string {
 	return nodes
 }
 
-func (p *PrometheusData) GetCpu(node string) []float64 {
+func (p *PrometheusData) GetCpu(node string) map[string]float64 {
 	v1api := v1.NewAPI(p.client)
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
@@ -93,16 +91,10 @@ func (p *PrometheusData) GetCpu(node string) []float64 {
 		log.Fatalf("Warnings: %v\n", warnings)
 	}
 
-	sort.Slice(result.(model.Vector), func(i, j int) bool {
-		cpu_i, _ := strconv.Atoi(string(result.(model.Vector)[i].Metric["cpu"]))
-		cpu_j, _ := strconv.Atoi(string(result.(model.Vector)[j].Metric["cpu"]))
-		return cpu_i < cpu_j
-	})
-
-	cpus := make([]float64, 0, result.(model.Vector).Len())
+	cpus := make(map[string]float64)
 	for _, val := range result.(model.Vector) {
-		// percent, err := strconv.ParseFloat(string(val.Value), 64)
-		cpus = append(cpus, float64(val.Value))
+		cpuName := string(val.Metric["cpu"])
+		cpus[cpuName] = float64(val.Value)
 	}
 	return cpus
 }

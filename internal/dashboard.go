@@ -281,18 +281,15 @@ func (m dashboardModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					cpus := m.sources[chart.NodeRef.SourceIndex].GetCpu(chart.NodeRef.NodeName)
 
 					// Initialize CPU data if needed
-					if len(chart.CpuData) != len(cpus) {
-						chart.CpuData = make([][]float64, len(cpus))
-						for j := range chart.CpuData {
-							chart.CpuData[j] = []float64{}
-						}
+					if chart.CpuData == nil {
+						chart.CpuData = make(map[string][]float64)
 					}
 
-					// Append new data and trim
-					for j, c := range cpus {
-						chart.CpuData[j] = append(chart.CpuData[j], c)
-						if len(chart.CpuData[j]) > maxDataPoints {
-							chart.CpuData[j] = chart.CpuData[j][len(chart.CpuData[j])-maxDataPoints:]
+					// Append new data and trim for each CPU
+					for cpuName, value := range cpus {
+						chart.CpuData[cpuName] = append(chart.CpuData[cpuName], value)
+						if len(chart.CpuData[cpuName]) > maxDataPoints {
+							chart.CpuData[cpuName] = chart.CpuData[cpuName][len(chart.CpuData[cpuName])-maxDataPoints:]
 						}
 					}
 				}
@@ -335,7 +332,7 @@ func (m dashboardModel) addChart(chartType string) dashboardModel {
 	newChart := Chart{
 		NodeRef:   selectedRef,
 		ChartType: chartType,
-		CpuData:   make([][]float64, 0),
+		CpuData:   make(map[string][]float64),
 	}
 
 	// If modalNewPane is true, always create a new pane

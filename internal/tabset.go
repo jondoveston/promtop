@@ -2,6 +2,8 @@ package promtop
 
 import (
 	"fmt"
+	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
@@ -177,11 +179,28 @@ func (ts *TabSet) renderChartContent(chart Chart, width, height int) string {
 		if len(chart.CpuData) > 0 {
 			// Create table for CPU data
 			rows := [][]string{}
-			for i, data := range chart.CpuData {
+
+			// Sort CPU names for consistent display
+			cpuNames := make([]string, 0, len(chart.CpuData))
+			for cpuName := range chart.CpuData {
+				cpuNames = append(cpuNames, cpuName)
+			}
+			// Sort numerically by converting to int
+			sort.Slice(cpuNames, func(i, j int) bool {
+				numI, errI := strconv.Atoi(cpuNames[i])
+				numJ, errJ := strconv.Atoi(cpuNames[j])
+				if errI == nil && errJ == nil {
+					return numI < numJ
+				}
+				return cpuNames[i] < cpuNames[j]
+			})
+
+			for _, cpuName := range cpuNames {
+				data := chart.CpuData[cpuName]
 				if len(data) > 0 {
 					latest := data[len(data)-1]
 					rows = append(rows, []string{
-						fmt.Sprintf("Core %d", i),
+						fmt.Sprintf("Core %s", cpuName),
 						fmt.Sprintf("%.1f%%", latest),
 					})
 				}
