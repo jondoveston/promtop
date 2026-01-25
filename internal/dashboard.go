@@ -40,7 +40,7 @@ type dashboardModel struct {
 type tickMsg time.Time
 
 func tickCmd() tea.Cmd {
-	return tea.Tick(time.Second, func(t time.Time) tea.Msg {
+	return tea.Tick(UpdateDuration(), func(t time.Time) tea.Msg {
 		return tickMsg(t)
 	})
 }
@@ -271,7 +271,7 @@ func (m dashboardModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.selectedNode = max(0, len(m.nodeRefs)-1)
 		}
 
-		// Update CPU data for all charts in all panes
+		// Update CPU and Memory data for all charts in all panes
 		maxDataPoints := max(m.width-40, 20)
 		for _, pane := range m.activePanes {
 			charts := pane.GetCharts()
@@ -281,20 +281,20 @@ func (m dashboardModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					cpus := m.sources[chart.NodeRef.SourceIndex].GetCpu(chart.NodeRef.NodeName)
 
 					// Initialize CPU data if needed
-					if len(chart.CpuData) != len(cpus) {
-						chart.CpuData = make([][]float64, len(cpus))
-						for j := range chart.CpuData {
-							chart.CpuData[j] = []float64{}
-						}
+					if chart.CpuData == nil {
+						chart.CpuData = make(map[string][]float64)
 					}
 
-					// Append new data and trim
-					for j, c := range cpus {
-						chart.CpuData[j] = append(chart.CpuData[j], c)
-						if len(chart.CpuData[j]) > maxDataPoints {
-							chart.CpuData[j] = chart.CpuData[j][len(chart.CpuData[j])-maxDataPoints:]
+					// Append new data and trim for each CPU
+					for cpuName, value := range cpus {
+						chart.CpuData[cpuName] = append(chart.CpuData[cpuName], value)
+						if len(chart.CpuData[cpuName]) > maxDataPoints {
+							chart.CpuData[cpuName] = chart.CpuData[cpuName][len(chart.CpuData[cpuName])-maxDataPoints:]
 						}
 					}
+				} else if chart.ChartType == "memory" {
+					// Fetch latest memory data
+					chart.MemoryData = m.sources[chart.NodeRef.SourceIndex].GetMemory(chart.NodeRef.NodeName)
 				}
 			}
 		}
@@ -333,9 +333,10 @@ func (m dashboardModel) addChart(chartType string) dashboardModel {
 
 	// Create the new chart
 	newChart := Chart{
-		NodeRef:   selectedRef,
-		ChartType: chartType,
-		CpuData:   make([][]float64, 0),
+		NodeRef:    selectedRef,
+		ChartType:  chartType,
+		CpuData:    make(map[string][]float64),
+		MemoryData: make(map[string]float64),
 	}
 
 	// If modalNewPane is true, always create a new pane

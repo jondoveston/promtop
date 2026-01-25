@@ -105,7 +105,7 @@ func (n *NodeExporterData) GetNodes() []string {
 	return keys
 }
 
-func (n *NodeExporterData) GetCpu(node string) []float64 {
+func (n *NodeExporterData) GetCpu(node string) map[string]float64 {
 	client := http.Client{
 		Timeout: 5 * time.Second,
 	}
@@ -150,14 +150,15 @@ func (n *NodeExporterData) GetCpu(node string) []float64 {
 	// append the new reading to the readings slice
 	n.cpus = append(n.cpus, currentCpu)
 	n.timestamps = append(n.timestamps, time.Now())
-	// limit the readings slice to 60 entries
-	if len(n.cpus) > 60 {
+	// limit the readings slice to MaxCPURecords entries
+	maxRecords := MaxCPURecords()
+	if len(n.cpus) > maxRecords {
 		n.cpus = n.cpus[1:]
 		n.timestamps = n.timestamps[1:]
 	}
 
 	// calculate the cpu usage rates
-	rates := []float64{}
+	rates := make(map[string]float64)
 	if len(n.cpus) < 2 {
 		return rates
 	}
@@ -165,6 +166,15 @@ func (n *NodeExporterData) GetCpu(node string) []float64 {
 	// calculate the interval between the first and last reading
 	interval := n.timestamps[len(n.timestamps)-1].Sub(n.timestamps[0]).Seconds()
 	for cpuIndex := 0; cpuIndex < len(n.cpus[0]); cpuIndex++ {
+		// Get the CPU name from the metric labels
+		var cpuName string
+		for _, label := range n.cpus[0][cpuIndex].GetLabel() {
+			if label.GetName() == "cpu" {
+				cpuName = label.GetValue()
+				break
+			}
+		}
+
 		// each cpu counter might have been reset so we need to calculate an offset
 		offset := 0.0
 		for readingIndex, reading := range n.cpus {
@@ -177,10 +187,101 @@ func (n *NodeExporterData) GetCpu(node string) []float64 {
 		last := n.cpus[len(n.cpus)-1][cpuIndex].GetCounter().GetValue() + offset
 		// because the times should add up to the interval
 		// we can calculate the cpu usage rate by subtracting the idle time from 100%
-		rates = append(rates, 100-100*(last-first)/interval)
+		rates[cpuName] = 100 - 100*(last-first)/interval
 	}
 
 	return rates
+}
+
+func (n *NodeExporterData) GetMemory(node string) map[string]float64 {
+	client := http.Client{
+		Timeout: 5 * time.Second,
+	}
+	resp, err := client.Get(n.nodes[node].String())
+	if err != nil {
+		log.Fatalln("Error querying node exporter:", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		log.Fatalln("Failed to read response body:", err)
+	}
+	parser := expfmt.TextParser{}
+	data, err := parser.TextToMetricFamilies(strings.NewReader(string(body)))
+	if err != nil {
+		log.Fatalln("Failed to parse metrics:", err)
+	}
+
+	memory := make(map[string]float64)
+
+	// Get total memory (Linux: MemTotal_bytes, macOS: total_bytes)
+	if memTotal, ok := data["node_memory_MemTotal_bytes"]; ok && len(memTotal.GetMetric()) > 0 {
+		memory["total"] = memTotal.GetMetric()[0].GetGauge().GetValue()
+	} else if memTotal, ok := data["node_memory_total_bytes"]; ok && len(memTotal.GetMetric()) > 0 {
+		memory["total"] = memTotal.GetMetric()[0].GetGauge().GetValue()
+	}
+
+	// Get available memory (Linux only)
+	if memAvailable, ok := data["node_memory_MemAvailable_bytes"]; ok && len(memAvailable.GetMetric()) > 0 {
+		memory["available"] = memAvailable.GetMetric()[0].GetGauge().GetValue()
+	}
+
+	// Get free memory (both Linux and macOS)
+	if memFree, ok := data["node_memory_MemFree_bytes"]; ok && len(memFree.GetMetric()) > 0 {
+		memory["free"] = memFree.GetMetric()[0].GetGauge().GetValue()
+	} else if memFree, ok := data["node_memory_free_bytes"]; ok && len(memFree.GetMetric()) > 0 {
+		memory["free"] = memFree.GetMetric()[0].GetGauge().GetValue()
+	}
+
+	// Get cached memory (Linux)
+	if memCached, ok := data["node_memory_Cached_bytes"]; ok && len(memCached.GetMetric()) > 0 {
+		memory["cached"] = memCached.GetMetric()[0].GetGauge().GetValue()
+	}
+
+	// Get buffer memory (Linux)
+	if memBuffers, ok := data["node_memory_Buffers_bytes"]; ok && len(memBuffers.GetMetric()) > 0 {
+		memory["buffers"] = memBuffers.GetMetric()[0].GetGauge().GetValue()
+	}
+
+	// macOS-specific metrics
+	if memActive, ok := data["node_memory_active_bytes"]; ok && len(memActive.GetMetric()) > 0 {
+		memory["active"] = memActive.GetMetric()[0].GetGauge().GetValue()
+	}
+
+	if memInactive, ok := data["node_memory_inactive_bytes"]; ok && len(memInactive.GetMetric()) > 0 {
+		memory["inactive"] = memInactive.GetMetric()[0].GetGauge().GetValue()
+	}
+
+	if memWired, ok := data["node_memory_wired_bytes"]; ok && len(memWired.GetMetric()) > 0 {
+		memory["wired"] = memWired.GetMetric()[0].GetGauge().GetValue()
+	}
+
+	// Calculate used memory and percentage
+	if total, ok := memory["total"]; ok && total > 0 {
+		// Linux: use available if present
+		if available, ok := memory["available"]; ok {
+			used := total - available
+			memory["used"] = used
+			memory["used_percent"] = (used / total) * 100
+		} else if free, ok := memory["free"]; ok {
+			// macOS: calculate from active + wired (or total - free as fallback)
+			if active, hasActive := memory["active"]; hasActive {
+				if wired, hasWired := memory["wired"]; hasWired {
+					used := active + wired
+					memory["used"] = used
+					memory["used_percent"] = (used / total) * 100
+				}
+			} else {
+				// Fallback: total - free
+				used := total - free
+				memory["used"] = used
+				memory["used_percent"] = (used / total) * 100
+			}
+		}
+	}
+
+	return memory
 }
 
 func (n *NodeExporterData) GetType() string {

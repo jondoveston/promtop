@@ -1,7 +1,8 @@
 package promtop
 
 type Data interface {
-	GetCpu(string) []float64
+	GetCpu(string) map[string]float64
+	GetMemory(string) map[string]float64
 	GetNodes() []string
 	Check() error
 	GetType() string // Returns "prometheus" or "node_exporter"
