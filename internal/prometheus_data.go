@@ -113,37 +113,89 @@ func (p *PrometheusData) GetMemory(node string) map[string]float64 {
 
 	memory := make(map[string]float64)
 
-	// Get total memory
+	// Get total memory (Linux: MemTotal_bytes, macOS: total_bytes)
 	result, _, err := v1api.Query(ctx, fmt.Sprintf("node_memory_MemTotal_bytes{instance=\"%s\",job=\"node_exporter\"}", node), time.Now())
 	if err == nil && result.(model.Vector).Len() > 0 {
 		memory["total"] = float64(result.(model.Vector)[0].Value)
+	} else {
+		// Try macOS naming
+		result, _, err = v1api.Query(ctx, fmt.Sprintf("node_memory_total_bytes{instance=\"%s\",job=\"node_exporter\"}", node), time.Now())
+		if err == nil && result.(model.Vector).Len() > 0 {
+			memory["total"] = float64(result.(model.Vector)[0].Value)
+		}
 	}
 
-	// Get available memory
+	// Get available memory (Linux only - MemAvailable_bytes)
 	result, _, err = v1api.Query(ctx, fmt.Sprintf("node_memory_MemAvailable_bytes{instance=\"%s\",job=\"node_exporter\"}", node), time.Now())
 	if err == nil && result.(model.Vector).Len() > 0 {
 		memory["available"] = float64(result.(model.Vector)[0].Value)
 	}
 
-	// Calculate used memory and percentage
-	if total, ok := memory["total"]; ok && total > 0 {
-		if available, ok := memory["available"]; ok {
-			used := total - available
-			memory["used"] = used
-			memory["used_percent"] = (used / total) * 100
+	// Get free memory (both Linux and macOS have this)
+	result, _, err = v1api.Query(ctx, fmt.Sprintf("node_memory_MemFree_bytes{instance=\"%s\",job=\"node_exporter\"}", node), time.Now())
+	if err == nil && result.(model.Vector).Len() > 0 {
+		memory["free"] = float64(result.(model.Vector)[0].Value)
+	} else {
+		// Try macOS naming
+		result, _, err = v1api.Query(ctx, fmt.Sprintf("node_memory_free_bytes{instance=\"%s\",job=\"node_exporter\"}", node), time.Now())
+		if err == nil && result.(model.Vector).Len() > 0 {
+			memory["free"] = float64(result.(model.Vector)[0].Value)
 		}
 	}
 
-	// Get cached memory
+	// Get cached memory (Linux: Cached_bytes)
 	result, _, err = v1api.Query(ctx, fmt.Sprintf("node_memory_Cached_bytes{instance=\"%s\",job=\"node_exporter\"}", node), time.Now())
 	if err == nil && result.(model.Vector).Len() > 0 {
 		memory["cached"] = float64(result.(model.Vector)[0].Value)
 	}
 
-	// Get buffer memory
+	// Get buffer memory (Linux: Buffers_bytes)
 	result, _, err = v1api.Query(ctx, fmt.Sprintf("node_memory_Buffers_bytes{instance=\"%s\",job=\"node_exporter\"}", node), time.Now())
 	if err == nil && result.(model.Vector).Len() > 0 {
 		memory["buffers"] = float64(result.(model.Vector)[0].Value)
+	}
+
+	// macOS-specific metrics
+	// Get active memory (macOS)
+	result, _, err = v1api.Query(ctx, fmt.Sprintf("node_memory_active_bytes{instance=\"%s\",job=\"node_exporter\"}", node), time.Now())
+	if err == nil && result.(model.Vector).Len() > 0 {
+		memory["active"] = float64(result.(model.Vector)[0].Value)
+	}
+
+	// Get inactive memory (macOS)
+	result, _, err = v1api.Query(ctx, fmt.Sprintf("node_memory_inactive_bytes{instance=\"%s\",job=\"node_exporter\"}", node), time.Now())
+	if err == nil && result.(model.Vector).Len() > 0 {
+		memory["inactive"] = float64(result.(model.Vector)[0].Value)
+	}
+
+	// Get wired memory (macOS)
+	result, _, err = v1api.Query(ctx, fmt.Sprintf("node_memory_wired_bytes{instance=\"%s\",job=\"node_exporter\"}", node), time.Now())
+	if err == nil && result.(model.Vector).Len() > 0 {
+		memory["wired"] = float64(result.(model.Vector)[0].Value)
+	}
+
+	// Calculate used memory and percentage
+	if total, ok := memory["total"]; ok && total > 0 {
+		// Linux: use available if present
+		if available, ok := memory["available"]; ok {
+			used := total - available
+			memory["used"] = used
+			memory["used_percent"] = (used / total) * 100
+		} else if free, ok := memory["free"]; ok {
+			// macOS: calculate from active + wired (or total - free as fallback)
+			if active, hasActive := memory["active"]; hasActive {
+				if wired, hasWired := memory["wired"]; hasWired {
+					used := active + wired
+					memory["used"] = used
+					memory["used_percent"] = (used / total) * 100
+				}
+			} else {
+				// Fallback: total - free
+				used := total - free
+				memory["used"] = used
+				memory["used_percent"] = (used / total) * 100
+			}
+		}
 	}
 
 	return memory

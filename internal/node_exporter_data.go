@@ -215,30 +215,70 @@ func (n *NodeExporterData) GetMemory(node string) map[string]float64 {
 
 	memory := make(map[string]float64)
 
-	// Extract memory metrics
+	// Get total memory (Linux: MemTotal_bytes, macOS: total_bytes)
 	if memTotal, ok := data["node_memory_MemTotal_bytes"]; ok && len(memTotal.GetMetric()) > 0 {
+		memory["total"] = memTotal.GetMetric()[0].GetGauge().GetValue()
+	} else if memTotal, ok := data["node_memory_total_bytes"]; ok && len(memTotal.GetMetric()) > 0 {
 		memory["total"] = memTotal.GetMetric()[0].GetGauge().GetValue()
 	}
 
+	// Get available memory (Linux only)
 	if memAvailable, ok := data["node_memory_MemAvailable_bytes"]; ok && len(memAvailable.GetMetric()) > 0 {
 		memory["available"] = memAvailable.GetMetric()[0].GetGauge().GetValue()
 	}
 
-	// Calculate used memory and percentage
-	if total, ok := memory["total"]; ok && total > 0 {
-		if available, ok := memory["available"]; ok {
-			used := total - available
-			memory["used"] = used
-			memory["used_percent"] = (used / total) * 100
-		}
+	// Get free memory (both Linux and macOS)
+	if memFree, ok := data["node_memory_MemFree_bytes"]; ok && len(memFree.GetMetric()) > 0 {
+		memory["free"] = memFree.GetMetric()[0].GetGauge().GetValue()
+	} else if memFree, ok := data["node_memory_free_bytes"]; ok && len(memFree.GetMetric()) > 0 {
+		memory["free"] = memFree.GetMetric()[0].GetGauge().GetValue()
 	}
 
+	// Get cached memory (Linux)
 	if memCached, ok := data["node_memory_Cached_bytes"]; ok && len(memCached.GetMetric()) > 0 {
 		memory["cached"] = memCached.GetMetric()[0].GetGauge().GetValue()
 	}
 
+	// Get buffer memory (Linux)
 	if memBuffers, ok := data["node_memory_Buffers_bytes"]; ok && len(memBuffers.GetMetric()) > 0 {
 		memory["buffers"] = memBuffers.GetMetric()[0].GetGauge().GetValue()
+	}
+
+	// macOS-specific metrics
+	if memActive, ok := data["node_memory_active_bytes"]; ok && len(memActive.GetMetric()) > 0 {
+		memory["active"] = memActive.GetMetric()[0].GetGauge().GetValue()
+	}
+
+	if memInactive, ok := data["node_memory_inactive_bytes"]; ok && len(memInactive.GetMetric()) > 0 {
+		memory["inactive"] = memInactive.GetMetric()[0].GetGauge().GetValue()
+	}
+
+	if memWired, ok := data["node_memory_wired_bytes"]; ok && len(memWired.GetMetric()) > 0 {
+		memory["wired"] = memWired.GetMetric()[0].GetGauge().GetValue()
+	}
+
+	// Calculate used memory and percentage
+	if total, ok := memory["total"]; ok && total > 0 {
+		// Linux: use available if present
+		if available, ok := memory["available"]; ok {
+			used := total - available
+			memory["used"] = used
+			memory["used_percent"] = (used / total) * 100
+		} else if free, ok := memory["free"]; ok {
+			// macOS: calculate from active + wired (or total - free as fallback)
+			if active, hasActive := memory["active"]; hasActive {
+				if wired, hasWired := memory["wired"]; hasWired {
+					used := active + wired
+					memory["used"] = used
+					memory["used_percent"] = (used / total) * 100
+				}
+			} else {
+				// Fallback: total - free
+				used := total - free
+				memory["used"] = used
+				memory["used_percent"] = (used / total) * 100
+			}
+		}
 	}
 
 	return memory

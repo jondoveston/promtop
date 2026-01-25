@@ -226,7 +226,101 @@ func (ts *TabSet) renderChartContent(chart Chart, width, height int) string {
 			content.WriteString("Waiting for data...")
 		}
 	case "memory":
-		content.WriteString("Memory metrics coming soon...")
+		if chart.MemoryData != nil && len(chart.MemoryData) > 0 {
+			// Convert bytes to GB for display
+			toGB := func(bytes float64) float64 {
+				return bytes / (1024 * 1024 * 1024)
+			}
+
+			rows := [][]string{}
+
+			// Total memory
+			if total, ok := chart.MemoryData["total"]; ok {
+				rows = append(rows, []string{
+					"Total",
+					fmt.Sprintf("%.2f GB", toGB(total)),
+				})
+			}
+
+			// Used memory with percentage
+			if used, ok := chart.MemoryData["used"]; ok {
+				usedStr := fmt.Sprintf("%.2f GB", toGB(used))
+				if usedPct, ok := chart.MemoryData["used_percent"]; ok {
+					usedStr += fmt.Sprintf(" (%.1f%%)", usedPct)
+				}
+				rows = append(rows, []string{
+					"Used",
+					usedStr,
+				})
+			}
+
+			// Available memory (Linux)
+			if available, ok := chart.MemoryData["available"]; ok {
+				rows = append(rows, []string{
+					"Available",
+					fmt.Sprintf("%.2f GB", toGB(available)),
+				})
+			}
+
+			// Free memory
+			if free, ok := chart.MemoryData["free"]; ok {
+				rows = append(rows, []string{
+					"Free",
+					fmt.Sprintf("%.2f GB", toGB(free)),
+				})
+			}
+
+			// Cached memory (Linux)
+			if cached, ok := chart.MemoryData["cached"]; ok {
+				rows = append(rows, []string{
+					"Cached",
+					fmt.Sprintf("%.2f GB", toGB(cached)),
+				})
+			}
+
+			// Buffers (Linux)
+			if buffers, ok := chart.MemoryData["buffers"]; ok {
+				rows = append(rows, []string{
+					"Buffers",
+					fmt.Sprintf("%.2f GB", toGB(buffers)),
+				})
+			}
+
+			// Active memory (macOS)
+			if active, ok := chart.MemoryData["active"]; ok {
+				rows = append(rows, []string{
+					"Active",
+					fmt.Sprintf("%.2f GB", toGB(active)),
+				})
+			}
+
+			// Inactive memory (macOS)
+			if inactive, ok := chart.MemoryData["inactive"]; ok {
+				rows = append(rows, []string{
+					"Inactive",
+					fmt.Sprintf("%.2f GB", toGB(inactive)),
+				})
+			}
+
+			// Wired memory (macOS)
+			if wired, ok := chart.MemoryData["wired"]; ok {
+				rows = append(rows, []string{
+					"Wired",
+					fmt.Sprintf("%.2f GB", toGB(wired)),
+				})
+			}
+
+			// Use WrapTable to handle wrapping when content exceeds height
+			t := NewWrapTable().
+				BorderStyle(lipgloss.NewStyle().Foreground(lipgloss.Color("240"))).
+				MaxHeight(height).
+				Headers("Metric", "Value").
+				Rows(rows...)
+
+			content.WriteString(t.Render())
+		} else {
+			content.WriteString("Waiting for data...")
+		}
 	case "disk":
 		content.WriteString("Disk metrics coming soon...")
 	case "network":

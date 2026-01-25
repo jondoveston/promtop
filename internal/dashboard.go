@@ -271,7 +271,7 @@ func (m dashboardModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.selectedNode = max(0, len(m.nodeRefs)-1)
 		}
 
-		// Update CPU data for all charts in all panes
+		// Update CPU and Memory data for all charts in all panes
 		maxDataPoints := max(m.width-40, 20)
 		for _, pane := range m.activePanes {
 			charts := pane.GetCharts()
@@ -292,6 +292,9 @@ func (m dashboardModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 							chart.CpuData[cpuName] = chart.CpuData[cpuName][len(chart.CpuData[cpuName])-maxDataPoints:]
 						}
 					}
+				} else if chart.ChartType == "memory" {
+					// Fetch latest memory data
+					chart.MemoryData = m.sources[chart.NodeRef.SourceIndex].GetMemory(chart.NodeRef.NodeName)
 				}
 			}
 		}
@@ -330,9 +333,10 @@ func (m dashboardModel) addChart(chartType string) dashboardModel {
 
 	// Create the new chart
 	newChart := Chart{
-		NodeRef:   selectedRef,
-		ChartType: chartType,
-		CpuData:   make(map[string][]float64),
+		NodeRef:    selectedRef,
+		ChartType:  chartType,
+		CpuData:    make(map[string][]float64),
+		MemoryData: make(map[string]float64),
 	}
 
 	// If modalNewPane is true, always create a new pane
